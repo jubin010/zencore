@@ -1,0 +1,13 @@
+# ZenCore Requirements
+# ZenCore 依赖文件
+
+# LLM 后端
+ollama>=0.1.0        # 本地Ollama API (推荐)
+openai>=1.0.0        # OpenAI API (可选)
+
+# 外壳驱动
+pywebio>=1.6.0       # Web外壳
+
+# 通用依赖
+requests>=2.28.0     # HTTP请求
+rich>=13.0.0         # 富文本输出

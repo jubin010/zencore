@@ -1,0 +1,16 @@
+{
+    "name": "钛合金取样业务智能助手",
+    "version": "1.0.0",
+    "llm": {
+        "type": "ollama",
+        "host": "http://192.168.1.24:11434",
+        "model": "qwen2.5:14b"
+    },
+    "plugins": {
+        "auto_load": []
+    },
+    "memory": {
+        "enabled": true,
+        "file": "记忆.md"
+    }
+}
