@@ -382,11 +382,19 @@ class AgentCore:
 
         return "❌ 对话超时，已达到最大轮次限制"
 
+    def _sanitize_text(self, text: str) -> str:
+        """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""
+        import re
+
+        # 移除 U+D800 到 U+DFFF 之间的字符
+        return re.sub(r"[\ud800-\udfff]", "", text)
+
     def _call_llm(self, prompt: str) -> str:
         if self.driver and hasattr(self.driver, "call_llm"):
             try:
                 messages = json.loads(prompt)
-                return self.driver.call_llm(messages)
+                response = self.driver.call_llm(messages)
+                return self._sanitize_text(response)
             except Exception as e:
                 return f"❌ LLM调用失败: {str(e)}\n{traceback.format_exc()}"
         else:
