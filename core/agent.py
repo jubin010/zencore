@@ -134,11 +134,12 @@ class AgentCore:
         # 当前加载的非核心插件（用于自动卸载）
         self._loaded_plugins: set = set()
 
-        # 角色与记忆
+        # 双重记忆架构
+        # 本体记忆：全局、跨角色、长期有效（史密斯的底层代码）
+        self._global_memory_file: str = str(PLUGINS_DIR / "memory_plugin" / "memory.md")
+        # 角色记忆：局部、单角色、任务周期有效（当前面具的工作笔记）
         self._current_role: str = ""
-        self._current_memory_file: str = str(
-            PLUGINS_DIR / "memory_plugin" / "memory.md"
-        )
+        self._current_role_memory_file: str = ""
 
         # 加载核心插件
         self._load_core_plugins()
@@ -410,11 +411,17 @@ class AgentCore:
 
 {plugins_info}
 
-## 你的记忆
+## 你的记忆（双重记忆架构）
 
-你的记忆存放在 `{self._current_memory_file}` 中。
-使用 `read_file` 读取记忆，使用 `write_file` 或 `append_file` 更新记忆。
-记忆由你自主维护，格式为纯 Markdown。
+你的记忆分为两层：
+- **本体记忆**（全局）：存放在 `{self._global_memory_file}` 中。记录用户画像、系统环境、项目全局上下文、跨角色通用经验。使用 `read_global_memory` / `write_global_memory` / `append_global_memory` 操作。
+- **角色记忆**（局部）：当前角色的工作笔记。切换角色时自动切换。使用 `read_file` / `write_file` / `append_file` 操作。
+
+**规则**：
+- 角色记忆优先用于当前任务。
+- 本体记忆是底层认知，所有角色都应知晓。
+- 角色记忆不重复记录全局事实，只记录增量和临时上下文。
+- 需要全局信息时调用 `read_global_memory`。
 
 ## 工作原则
 
@@ -437,10 +444,8 @@ class AgentCore:
 ## 上下文管理
 
 圆桌会议（对话历史）是你的短期记忆。当它变得太长时：
-1. 切换到 **秘书** 角色
-2. 回顾讨论，提取核心结论
-3. 用 `write_memory` 或 `append_file` 将摘要写入记忆
-4. 用 `clear_history` 清空圆桌，恢复清净
+1. 切换到 **秘书** 角色，将结论归档到 `memory.md`，然后清空圆桌
+2. 当需要过去的信息时，切换到 **图书管理员** 角色，从记忆文件中检索并贴回圆桌
 
 ## 响应格式
 
