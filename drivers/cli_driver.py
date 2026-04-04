@@ -7,6 +7,7 @@ CLI外壳驱动 - 命令行界面（Rich 美化版）
 支持思考模式（thinking）：使用 response.message.thinking 字段
 """
 
+import re
 import sys
 from rich.console import Console
 from rich.panel import Panel
@@ -15,6 +16,11 @@ from rich.rule import Rule
 from core.agent import DriverInterface
 
 console = Console()
+
+
+def _sanitize(text: str) -> str:
+    """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates U+D800-U+DFFF)"""
+    return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
 
 
 class CLIDriver(DriverInterface):
@@ -52,20 +58,22 @@ class CLIDriver(DriverInterface):
         if self._client is None:
             if not self.api_key or self.api_key.lower() == "ollama":
                 import ollama
+
                 self._client = ollama.Client(host=self.host)
             else:
                 from openai import OpenAI
+
                 self._client = OpenAI(base_url=self.host, api_key=self.api_key)
         return self._client
 
     def _extract_thinking_from_openai(self, message) -> str:
         """从 OpenAI 兼容响应中提取思考内容（MiniMax reasoning_details）"""
-        if hasattr(message, 'reasoning_details') and message.reasoning_details:
+        if hasattr(message, "reasoning_details") and message.reasoning_details:
             parts = []
             for detail in message.reasoning_details:
                 if isinstance(detail, dict) and "text" in detail:
                     parts.append(detail["text"])
-                elif hasattr(detail, 'text'):
+                elif hasattr(detail, "text"):
                     parts.append(detail.text)
             return "\n".join(parts)
         return ""
@@ -98,23 +106,32 @@ class CLIDriver(DriverInterface):
         """调用 LLM — 根据 api_key 自动选择 SDK"""
         try:
             client = self._get_client()
-            
+
             if not self.api_key or self.api_key.lower() == "ollama":
                 response = client.chat(
                     model=self.model,
                     messages=messages,
                     think=self.thinking,
                 )
-                
-                if self.thinking and hasattr(response.message, 'thinking') and response.message.thinking:
-                    thinking = response.message.thinking
-                    answer = response.message.content
-                    console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
+
+                thinking = (
+                    _sanitize(response.message.thinking)
+                    if hasattr(response.message, "thinking")
+                    else ""
+                )
+                answer = _sanitize(response.message.content)
+
+                if self.thinking and thinking:
+                    console.print(
+                        Panel(
+                            Markdown(thinking), title="💭 思考过程", border_style="blue"
+                        )
+                    )
                     console.print(Rule(style="dim"))
                     return answer
-                
-                return response.message.content
-                
+
+                return answer
+
             else:
                 extra_body = {}
                 if self.thinking:
@@ -122,30 +139,40 @@ class CLIDriver(DriverInterface):
                         extra_body["reasoning_split"] = True
                     else:
                         extra_body["thinking"] = True
-                
+
                 response = client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=0.7,
                     extra_body=extra_body,
                 )
-                
-                message = response.choices[0].message
-                
-                if self.thinking and self.thinking_mode == "reasoning_split":
-                    thinking = self._extract_thinking_from_openai(message)
-                    if thinking:
-                        console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
-                        console.print(Rule(style="dim"))
-                    return message.content
-                
-                if self.thinking and hasattr(message, 'thinking') and message.thinking:
-                    thinking = message.thinking
-                    console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
-                    console.print(Rule(style="dim"))
-                    return message.content
 
-                return message.content
+                message = response.choices[0].message
+
+                if self.thinking and self.thinking_mode == "reasoning_split":
+                    thinking = _sanitize(self._extract_thinking_from_openai(message))
+                    if thinking:
+                        console.print(
+                            Panel(
+                                Markdown(thinking),
+                                title="💭 思考过程",
+                                border_style="blue",
+                            )
+                        )
+                        console.print(Rule(style="dim"))
+                    return _sanitize(message.content)
+
+                if self.thinking and hasattr(message, "thinking") and message.thinking:
+                    thinking = _sanitize(message.thinking)
+                    console.print(
+                        Panel(
+                            Markdown(thinking), title="💭 思考过程", border_style="blue"
+                        )
+                    )
+                    console.print(Rule(style="dim"))
+                    return _sanitize(message.content)
+
+                return _sanitize(message.content)
 
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"
