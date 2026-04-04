@@ -22,6 +22,35 @@ def load_config():
     return {}
 
 
+def get_active_model(config: dict) -> dict:
+    """获取当前激活的模型配置"""
+    models = config.get("models", [])
+    if not models:
+        return {"name": "默认模型", "host": "http://localhost:11434", "model": "qwen3.5:9b", "api_key": "ollama", "thinking": False}
+    
+    active_idx = config.get("active_model", 0)
+    if 0 <= active_idx < len(models):
+        return models[active_idx]
+    return models[0]
+
+
+def list_models(config: dict) -> str:
+    """列出所有可用模型"""
+    models = config.get("models", [])
+    if not models:
+        return "📭 暂无配置的模型"
+    
+    active_idx = config.get("active_model", 0)
+    lines = ["🔌 可用模型列表", "=" * 40]
+    for i, m in enumerate(models):
+        marker = "▶" if i == active_idx else " "
+        name = m.get("name", f"模型 {i}")
+        model = m.get("model", "?")
+        thinking = "🧠" if m.get("thinking") else "  "
+        lines.append(f"  {marker} [{i}] {thinking} {name} ({model})")
+    return "\n".join(lines)
+
+
 def main():
     if len(sys.argv) < 2:
         print("""
@@ -45,19 +74,24 @@ def main():
 
     if mode == "cli":
         from drivers.cli_driver import CLIDriver
-        llm_config = config.get("llm", {})
-        driver = CLIDriver(llm_config=llm_config)
+
+        model_config = get_active_model(config)
+        driver = CLIDriver(model_config=model_config)
         agent = AgentCore(driver=driver)
-        print("\n🚀 启动 CLI 模式...")
-        agent.run_cli()
+
+        print(f"\n🚀 启动 CLI 模式...")
+        print(f"📡 当前模型: {driver.name} ({driver.model})")
+        print(list_models(config))
+        print()
+        agent.run_cli(config=config)
 
     elif mode == "genesis":
         from drivers.cli_driver import CLIDriver
-        llm_config = config.get("llm", {})
-        driver = CLIDriver(llm_config=llm_config)
+
+        model_config = get_active_model(config)
+        driver = CLIDriver(model_config=model_config)
         agent = AgentCore(driver=driver)
         
-        # 解析参数
         backup_interval = 5
         clear_interval = 10
         for i, arg in enumerate(sys.argv):
@@ -67,6 +101,7 @@ def main():
                 clear_interval = int(sys.argv[i + 1])
         
         print(f"\n🌱 启动 Genesis 模式 (备份={backup_interval}轮, 清理={clear_interval}轮)...")
+        print(f"📡 当前模型: {driver.name} ({driver.model})")
         agent.run_genesis(backup_interval=backup_interval, clear_interval=clear_interval)
 
     else:

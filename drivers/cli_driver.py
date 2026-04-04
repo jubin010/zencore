@@ -14,18 +14,30 @@ from core.agent import DriverInterface
 class CLIDriver(DriverInterface):
     """命令行驱动"""
 
-    def __init__(self, llm_config: dict = None):
-        self.llm_config = llm_config or {
+    def __init__(self, model_config: dict = None):
+        self.model_config = model_config or {
+            "name": "默认模型",
             "host": "http://localhost:11434",
             "model": "qwen3.5:9b",
             "api_key": "ollama",
             "thinking": False,
         }
-        self.host = self.llm_config.get("host", "http://localhost:11434")
-        self.model = self.llm_config.get("model", "qwen3.5:9b")
-        self.api_key = self.llm_config.get("api_key", "")
-        self.thinking = self.llm_config.get("thinking", False)
+        self.name = self.model_config.get("name", "未知模型")
+        self.host = self.model_config.get("host", "http://localhost:11434")
+        self.model = self.model_config.get("model", "qwen3.5:9b")
+        self.api_key = self.model_config.get("api_key", "")
+        self.thinking = self.model_config.get("thinking", False)
         self._client = None
+
+    def switch_model(self, model_config: dict):
+        """切换模型配置"""
+        self.model_config = model_config
+        self.name = model_config.get("name", "未知模型")
+        self.host = model_config.get("host", "http://localhost:11434")
+        self.model = model_config.get("model", "qwen3.5:9b")
+        self.api_key = model_config.get("api_key", "")
+        self.thinking = model_config.get("thinking", False)
+        self._client = None  # 重置客户端
 
     def _get_client(self):
         """懒加载客户端，根据 api_key 自动路由"""
@@ -78,11 +90,9 @@ class CLIDriver(DriverInterface):
                     think=self.thinking,
                 )
                 
-                # 处理思考模式：ollama SDK 返回独立的 thinking 字段
                 if self.thinking and hasattr(response.message, 'thinking') and response.message.thinking:
                     thinking = response.message.thinking
                     answer = response.message.content
-                    
                     print(f"\n💭 思考过程:\n{thinking}\n")
                     print(f"{'─' * 40}")
                     return answer
@@ -90,7 +100,6 @@ class CLIDriver(DriverInterface):
                 return response.message.content
                 
             else:
-                # OpenAI 兼容接口
                 extra_body = {}
                 if self.thinking:
                     extra_body["thinking"] = True

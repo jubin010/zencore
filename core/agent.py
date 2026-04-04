@@ -417,12 +417,15 @@ class AgentCore:
                 time.sleep(5)
                 continue
 
-    def run_cli(self):
+    def run_cli(self, config: dict = None):
+        """运行 CLI 交互模式"""
+        config = config or {}
         print("=" * 50)
-        print("🌱 Genesis — 一切从简，让 AI 自主演化")
+        print("🌱 zencore — 一切从简，让 AI 自主演化")
         print("=" * 50)
         print("输入消息与AI对话，输入 'quit' 退出")
         print("输入 'tools' 查看可用工具")
+        print("输入 'models' 查看/切换模型")
         print("=" * 50)
         while True:
             try:
@@ -437,6 +440,32 @@ class AgentCore:
                     print(f"\n🛠️ 可用工具 ({len(tools)}个):")
                     for name, info in sorted(tools.items()):
                         print(f"   • {name}")
+                    continue
+                if user_input.lower() == "models":
+                    models = config.get("models", [])
+                    active_idx = config.get("active_model", 0)
+                    print("\n🔌 可用模型:")
+                    for i, m in enumerate(models):
+                        marker = "▶" if i == active_idx else " "
+                        name = m.get("name", f"模型 {i}")
+                        model = m.get("model", "?")
+                        print(f"  {marker} [{i}] {name} ({model})")
+                    print("\n切换模型: 输入 'switch <索引>' 如 'switch 1'")
+                    continue
+                if user_input.lower().startswith("switch "):
+                    try:
+                        idx = int(user_input.split()[1])
+                        models = config.get("models", [])
+                        if 0 <= idx < len(models):
+                            config["active_model"] = idx
+                            self.driver.switch_model(models[idx])
+                            print(
+                                f"✅ 已切换到: {self.driver.name} ({self.driver.model})"
+                            )
+                        else:
+                            print(f"❌ 索引超出范围 (0-{len(models) - 1})")
+                    except (ValueError, IndexError):
+                        print("❌ 用法: switch <索引>")
                     continue
                 print("\n🤖 AI: ", end="", flush=True)
                 response = self.chat_with_tools(user_input)
