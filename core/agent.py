@@ -16,6 +16,8 @@ from datetime import datetime
 AGENT_CORE_DIR = Path(__file__).parent.parent
 PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
+ROLES_DIR = PLUGINS_DIR / "roles"
+GLOBAL_LESSONS = PLUGINS_DIR / "memory_plugin" / "lessons.md"
 
 # 核心插件 — 永久保留
 CORE_PLUGINS = {"plugin_builder", "env_plugin"}
@@ -92,6 +94,10 @@ class AgentCore:
 
         # 当前加载的非核心插件
         self._loaded_plugins: set = set()
+
+        # 角色与记忆
+        self._current_role: str = ""
+        self._current_role_memory_file: str = ""
 
         # 加载核心插件
         self._load_core_plugins()
@@ -209,9 +215,17 @@ class AgentCore:
             try:
                 return func(**kwargs)
             except Exception as e:
-                return f"❌ 工具执行失败: {str(e)}\n{traceback.format_exc()}"
+                plugin = self.tool_registry._tools.get(name, {}).get(
+                    "plugin", "unknown"
+                )
+                return (
+                    f"❌ [ERROR] tool: {name}\n"
+                    f"   原因: {str(e)}\n"
+                    f"   建议: 分析原因，修正后追加教训到 lessons.md\n"
+                    f"   格式: `- 工具: {name} | 错误: {str(e)[:50]} | 修正: ...`"
+                )
         else:
-            return f"❌ 未知工具: {name}"
+            return f"❌ [ERROR] tool: {name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
 
     def add_message(self, role: str, content: str):
         self.conversation_history.append(
@@ -223,9 +237,32 @@ class AgentCore:
     def clear_history(self):
         self.conversation_history = []
 
+    def _load_lessons(self, role: str = "") -> str:
+        """加载教训（全局 + 角色专属）"""
+        lines = []
+
+        # 全局教训
+        if GLOBAL_LESSONS.exists():
+            content = GLOBAL_LESSONS.read_text(encoding="utf-8").strip()
+            if content and "暂无教训" not in content:
+                lines.append("### 全局教训")
+                lines.append(content)
+
+        # 角色专属教训
+        if role:
+            role_lessons = ROLES_DIR / role / "lessons.md"
+            if role_lessons.exists():
+                content = role_lessons.read_text(encoding="utf-8").strip()
+                if content and "暂无教训" not in content:
+                    lines.append(f"### {role}专属教训")
+                    lines.append(content)
+
+        return "\n\n".join(lines) if lines else "（暂无教训，保持警惕）"
+
     def _build_prompt(self, user_message: str) -> str:
         tools_desc = self._get_tools_description()
         plugins_info = self._get_plugins_info()
+        lessons = self._load_lessons(self._current_role)
 
         system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
 
@@ -247,10 +284,29 @@ class AgentCore:
 2. **自我进化**: 遇到没有的工具，用 `write_plugin` 编写新插件
 3. **工具优先**: 优先使用工具解决问题，不要凭空编造
 
+## 历史教训（避免重蹈覆辙）
+
+{lessons}
+
 ## 响应格式
 
 当需要执行工具时，返回JSON格式:
 {{"tool": "工具名", "params": {{"参数名": "参数值"}}}}
+
+## 工具说明书
+
+每个工具的详细说明存放在 `plugins/{{插件名}}/plugin.md` 中。
+如果不确定参数或用法，用 `read_file` 读取对应说明书学习。
+例如: `read_file(path="plugins/env_plugin/plugin.md")`
+
+## 错误记录规则
+
+遇到工具报错时：
+1. 分析原因，修正参数或代码
+2. 用 `append_file` 将教训追加到对应的 lessons.md
+   - 系统级教训: `plugins/memory_plugin/lessons.md`
+   - 角色专属教训: `plugins/roles/{{角色名}}/lessons.md`
+3. 格式: `- 工具: xxx | 错误: yyy | 修正: zzz`
 
 当直接回答时，直接返回文字内容。
 
@@ -295,16 +351,27 @@ class AgentCore:
         prompt = self._build_prompt(message)
         max_turns = 10
         turns = 0
+        error_count = 0
+
         while turns < max_turns:
             turns += 1
             llm_response = self._call_llm(prompt)
             tool_call = self._extract_tool_call(llm_response)
+
             if tool_call is None:
                 self.add_message("assistant", llm_response)
                 return llm_response
+
             tool_name = tool_call.get("tool")
             tool_params = tool_call.get("params", {})
             tool_result = self.execute_tool(tool_name, **tool_params)
+
+            # 监督机制：检测错误
+            if tool_result.startswith("❌ [ERROR]"):
+                error_count += 1
+                # 强制拦截：要求 AI 记录教训
+                tool_result += f"\n\n⚠️ [监督] 错误 #{error_count}。你必须先调用 append_file 将教训追加到 lessons.md，然后才能重试。"
+
             tool_message = json.dumps(
                 {"tool": tool_name, "params": tool_params, "result": tool_result},
                 ensure_ascii=False,
@@ -312,6 +379,7 @@ class AgentCore:
             self.add_message("assistant", f"[工具调用]\n{tool_message}")
             self.add_message("tool", tool_result)
             prompt = self._build_prompt("")
+
         return "❌ 对话超时，已达到最大轮次限制"
 
     def _call_llm(self, prompt: str) -> str:
