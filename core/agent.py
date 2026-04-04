@@ -477,8 +477,8 @@ class AgentCore:
                 time.sleep(5)
                 continue
 
-    def run_cli(self, config: dict = None):
-        """运行 CLI 交互模式"""
+    def run_wwg(self, config: dict = None):
+        """运行 WWG (Walk with God) 交互模式"""
         from rich.console import Console
         from rich.panel import Panel
         from rich.markdown import Markdown
@@ -488,9 +488,9 @@ class AgentCore:
 
         console.print(
             Panel(
-                "[bold cyan]zencore[/] — 一切从简，让 AI 自主演化\n"
+                "[bold cyan]zencore[/] — 一切从简，与神同行\n"
                 "输入 [bold]quit[/] 退出 | [bold]tools[/] 查看工具 | [bold]models[/] 切换模型",
-                title="🌱 交互模式",
+                title="🕊️ Walk with God",
                 border_style="green",
             )
         )
@@ -501,7 +501,7 @@ class AgentCore:
                 if not user_input:
                     continue
                 if user_input.lower() in ("quit", "exit", "退出"):
-                    console.print("[bold yellow]👋 再见![/]")
+                    console.print("[bold yellow]🕊️ 愿神与你同在![/]")
                     break
                 if user_input.lower() == "tools":
                     tools = self.list_tools()
@@ -555,11 +555,11 @@ class AgentCore:
                 console.print()
                 response = self.chat_with_tools(user_input)
                 console.print(
-                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
+                    Panel(Markdown(response), title="🕊️ 神说", border_style="cyan")
                 )
 
             except KeyboardInterrupt:
-                console.print("\n[bold yellow]👋 再见![/]")
+                console.print("\n[bold yellow]🕊️ 愿神与你同在![/]")
                 break
             except Exception as e:
                 console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
