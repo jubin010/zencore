@@ -89,7 +89,9 @@ class CLIDriver(DriverInterface):
 
     def get_input(self, prompt: str = "") -> str:
         try:
-            return console.input(f"\n[bold green]👤 你:[/] ")
+            # 使用原生 input 并保留图标，避开 Rich 的编码坑
+            val = input("\n👤 你: ")
+            return _sanitize(val)
         except EOFError:
             return ""
 

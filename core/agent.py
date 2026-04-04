@@ -20,7 +20,13 @@ ROLES_DIR = PLUGINS_DIR / "roles"
 GLOBAL_LESSONS = PLUGINS_DIR / "memory_plugin" / "lessons.md"
 
 # 核心插件 — 永久保留
-CORE_PLUGINS = {"plugin_builder", "env_plugin"}
+CORE_PLUGINS = {
+    "plugin_builder",
+    "env_plugin",
+    "memory_plugin",
+    "watcher_plugin",
+    "role_plugin",
+}
 
 
 class DriverInterface:
@@ -95,7 +101,10 @@ class AgentCore:
         # 当前加载的非核心插件
         self._loaded_plugins: set = set()
 
-        # 角色与记忆
+        # 双重记忆架构
+        # 本体记忆：全局、跨角色、长期有效（史密斯的底层代码）
+        self._global_memory_file: str = str(PLUGINS_DIR / "memory_plugin" / "memory.md")
+        # 角色记忆：局部、单角色、任务周期有效（当前面具的工作笔记）
         self._current_role: str = ""
         self._current_role_memory_file: str = ""
 
