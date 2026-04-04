@@ -1,10 +1,9 @@
 """
 CLI外壳驱动 - 命令行界面
-LLM 连接使用 openai SDK（兼容 Ollama 和 OpenAI）
+Ollama 用 ollama 包，OpenAI 用 openai 包
 """
 
 import sys
-from openai import OpenAI
 from core.agent import DriverInterface
 
 
@@ -15,17 +14,25 @@ class CLIDriver(DriverInterface):
         self.llm_config = llm_config or {
             "type": "ollama",
             "host": "http://localhost:11434",
-            "model": "qwen2.5:7b",
+            "model": "qwen3.5:9b",
         }
-        self.client = self._create_client()
-        self.model = self.llm_config.get("model", "qwen2.5:7b")
+        self.model = self.llm_config.get("model", "qwen3.5:9b")
+        self._client = None
 
-    def _create_client(self) -> OpenAI:
-        """创建 OpenAI 兼容客户端"""
-        host = self.llm_config.get("host", "http://localhost:11434")
-        api_key = self.llm_config.get("api_key", "ollama")  # Ollama 不需要真实 key
-
-        return OpenAI(base_url=f"{host}/v1", api_key=api_key)
+    def _get_client(self):
+        """懒加载客户端"""
+        if self._client is None:
+            llm_type = self.llm_config.get("type", "ollama")
+            if llm_type == "ollama":
+                import ollama
+                host = self.llm_config.get("host", "http://localhost:11434")
+                self._client = ollama.Client(host=host)
+            else:
+                from openai import OpenAI
+                host = self.llm_config.get("host", "http://localhost:11434")
+                api_key = self.llm_config.get("api_key", "")
+                self._client = OpenAI(base_url=f"{host}/v1", api_key=api_key)
+        return self._client
 
     def send_message(self, content: str) -> None:
         print(content)
@@ -56,13 +63,18 @@ class CLIDriver(DriverInterface):
         pass
 
     def call_llm(self, messages: list) -> str:
-        """调用 LLM — 使用 openai SDK"""
+        """调用 LLM — 根据类型自动选择 SDK"""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.7,
-            )
-            return response.choices[0].message.content
+            llm_type = self.llm_config.get("type", "ollama")
+            client = self._get_client()
+
+            if llm_type == "ollama":
+                response = client.chat(model=self.model, messages=messages)
+                return response["message"]["content"]
+            else:
+                response = client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=0.7
+                )
+                return response.choices[0].message.content
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"
