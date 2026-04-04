@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 zencore 主入口
-支持多种运行模式: CLI / Web
+支持多种运行模式: CLI / Genesis
 """
 
 import sys
 from pathlib import Path
 
-# 添加项目根目录到路径
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
 
@@ -15,37 +14,27 @@ from core.agent import AgentCore
 
 
 def load_config():
-    """加载配置"""
     config_file = AGENT_CORE_DIR / "config" / "settings.json"
-
     if config_file.exists():
         import json
-
         with open(config_file, "r", encoding="utf-8") as f:
             return json.load(f)
-
     return {}
 
 
 def main():
-    """主入口"""
     if len(sys.argv) < 2:
         print("""
 ╔═══════════════════════════════════════════════════╗
 ║                                                   ║
-║           🤖 zencore AI智能体                     ║
-║           一切皆为插件，AI可插拔                    ║
+║           🌱 zencore — Genesis                    ║
+║           一切从简，让 AI 自主演化                  ║
 ║                                                   ║
 ╠═══════════════════════════════════════════════════╣
 ║                                                   ║
 ║  用法:                                            ║
-║    python main.py cli    - 命令行模式              ║
-║    python main.py web    - Web模式                 ║
-║                                                   ║
-║  示例:                                            ║
-║    python main.py cli                            ║
-║    python main.py web                            ║
-║    python main.py web --host 127.0.0.1 --port 8080║
+║    python main.py cli      - 交互式命令行          ║
+║    python main.py genesis  - 创世纪模式（自动进化）  ║
 ║                                                   ║
 ╚═══════════════════════════════════════════════════╝
         """)
@@ -56,39 +45,33 @@ def main():
 
     if mode == "cli":
         from drivers.cli_driver import CLIDriver
-
-        # LLM 配置是外壳的事
         llm_config = config.get("llm", {})
         driver = CLIDriver(llm_config=llm_config)
-
-        # 智能体核心不关心 LLM
         agent = AgentCore(driver=driver)
-
         print("\n🚀 启动 CLI 模式...")
         agent.run_cli()
 
-    elif mode == "web":
-        from drivers.web_driver import WebDriver
-
-        host = "0.0.0.0"
-        port = 8080
-
-        for i, arg in enumerate(sys.argv):
-            if arg == "--host" and i + 1 < len(sys.argv):
-                host = sys.argv[i + 1]
-            if arg == "--port" and i + 1 < len(sys.argv):
-                port = int(sys.argv[i + 1])
-
+    elif mode == "genesis":
+        from drivers.cli_driver import CLIDriver
         llm_config = config.get("llm", {})
-        agent = AgentCore()
-        driver = WebDriver(agent=agent, llm_config=llm_config)
-
-        print(f"\n🚀 启动 Web 模式 on {host}:{port}...")
-        driver.run(host, port)
+        driver = CLIDriver(llm_config=llm_config)
+        agent = AgentCore(driver=driver)
+        
+        # 解析参数
+        backup_interval = 5
+        clear_interval = 10
+        for i, arg in enumerate(sys.argv):
+            if arg == "--backup" and i + 1 < len(sys.argv):
+                backup_interval = int(sys.argv[i + 1])
+            if arg == "--clear" and i + 1 < len(sys.argv):
+                clear_interval = int(sys.argv[i + 1])
+        
+        print(f"\n🌱 启动 Genesis 模式 (备份={backup_interval}轮, 清理={clear_interval}轮)...")
+        agent.run_genesis(backup_interval=backup_interval, clear_interval=clear_interval)
 
     else:
         print(f"❌ 未知模式: {mode}")
-        print("支持的模式: cli, web")
+        print("支持的模式: cli, genesis")
         sys.exit(1)
 
 
