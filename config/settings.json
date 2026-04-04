@@ -25,6 +25,13 @@
             "thinking_mode": "reasoning_split"
         },
         {
+            "name": "通义千问 Turbo",
+            "host": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-turbo",
+            "api_key": "YOUR_DASHSCOPE_API_KEY",
+            "thinking": false
+        },
+        {
             "name": "DeepSeek V3",
             "host": "https://api.deepseek.com/v1",
             "model": "deepseek-chat",
