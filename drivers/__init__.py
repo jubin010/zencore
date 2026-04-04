@@ -4,4 +4,4 @@
 
 from .cli_driver import CLIDriver
 
-__all__ = ["CLIDriver"]
+__all__ = ['CLIDriver']

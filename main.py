@@ -68,6 +68,8 @@ def main():
         agent.run_cli()
 
     elif mode == "web":
+        from drivers.web_driver import WebDriver
+
         host = "0.0.0.0"
         port = 8080
 
@@ -77,9 +79,12 @@ def main():
             if arg == "--port" and i + 1 < len(sys.argv):
                 port = int(sys.argv[i + 1])
 
-        print(f"\n🚀 启动 Web 模式 on {host}:{port}...")
+        llm_config = config.get("llm", {})
         agent = AgentCore()
-        agent.run_web(host, port)
+        driver = WebDriver(agent=agent, llm_config=llm_config)
+
+        print(f"\n🚀 启动 Web 模式 on {host}:{port}...")
+        driver.run(host, port)
 
     else:
         print(f"❌ 未知模式: {mode}")

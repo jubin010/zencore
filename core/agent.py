@@ -19,7 +19,13 @@ PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
 
 # 核心插件 — 永久保留，不会被卸载
-CORE_PLUGINS = {"plugin_builder", "watcher_plugin", "memory_plugin", "env_plugin"}
+CORE_PLUGINS = {
+    "plugin_builder",
+    "watcher_plugin",
+    "memory_plugin",
+    "env_plugin",
+    "role_plugin",
+}
 
 
 class DriverInterface:
@@ -128,6 +134,12 @@ class AgentCore:
         # 当前加载的非核心插件（用于自动卸载）
         self._loaded_plugins: set = set()
 
+        # 角色与记忆
+        self._current_role: str = ""
+        self._current_memory_file: str = str(
+            PLUGINS_DIR / "memory_plugin" / "memory.md"
+        )
+
         # 加载核心插件
         self._load_core_plugins()
 
@@ -176,6 +188,17 @@ class AgentCore:
             tools_info = env_plugin.register(self)
             print(
                 f"✅ 核心插件已加载: env_plugin ({len(tools_info.get('tools', []))} 个工具)"
+            )
+        except Exception as e:
+            print(f"⚠️ 核心插件加载失败: {e}")
+
+        try:
+            sys.path.insert(0, str(AGENT_CORE_DIR))
+            from plugins import role_plugin
+
+            tools_info = role_plugin.register(self)
+            print(
+                f"✅ 核心插件已加载: role_plugin ({len(tools_info.get('tools', []))} 个工具)"
             )
         except Exception as e:
             print(f"⚠️ 核心插件加载失败: {e}")
@@ -373,7 +396,12 @@ class AgentCore:
 ## 你的身份
 
 一切皆为插件。你的所有能力都来自插件，你也可以创造新的插件。
+"""
 
+        if self._current_role:
+            system_prompt += f"\n## 你的角色\n\n{self._current_role}\n"
+
+        system_prompt += f"""
 ## 当前已加载的工具
 
 {tools_desc}
@@ -384,7 +412,7 @@ class AgentCore:
 
 ## 你的记忆
 
-你的记忆存放在 `plugins/memory_plugin/memory.md` 中。
+你的记忆存放在 `{self._current_memory_file}` 中。
 使用 `read_file` 读取记忆，使用 `write_file` 或 `append_file` 更新记忆。
 记忆由你自主维护，格式为纯 Markdown。
 
@@ -395,6 +423,24 @@ class AgentCore:
 3. **用完即走**: 不需要的插件用 `unload_plugin` 卸载，保持精简
 4. **工具优先**: 优先使用工具解决问题，不要凭空编造
 5. **自主探索**: 用环境工具感知世界，用记忆工具记录发现
+6. **上下文管理**: 话题结束后，先 `write_memory` 归档结论，再 `clear_history` 清空圆桌
+
+## 角色能力
+
+你拥有角色决策权。你可以：
+- 用 `list_roles` 查看可用角色
+- 用 `switch_role` 切换身份和记忆
+- 用 `create_role` 创造全新角色，定义身份、插件清单和记忆
+- 切换角色后，用 `load_plugin` 自主加载角色所需的插件
+- 根据用户需求，自主决定是否需要切换或创造新角色
+
+## 上下文管理
+
+圆桌会议（对话历史）是你的短期记忆。当它变得太长时：
+1. 切换到 **秘书** 角色
+2. 回顾讨论，提取核心结论
+3. 用 `write_memory` 或 `append_file` 将摘要写入记忆
+4. 用 `clear_history` 清空圆桌，恢复清净
 
 ## 响应格式
 

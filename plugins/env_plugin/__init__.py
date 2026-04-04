@@ -100,6 +100,25 @@ def register(agent):
         except Exception as e:
             return f"❌ 追加失败: {e}"
 
+    def clear_history() -> str:
+        """清空当前对话历史（圆桌会议记录）"""
+        try:
+            agent.clear_history()
+            return "✅ 圆桌已清空，上下文已重置"
+        except Exception as e:
+            return f"❌ 清空失败: {e}"
+
+    agent.add_tool(
+        "clear_history",
+        clear_history,
+        {
+            "name": "clear_history",
+            "description": "清空当前对话历史。当话题结束或上下文过长时调用，配合记忆归档使用。",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "env_plugin",
+        },
+    )
+
     agent.add_tool(
         "get_cwd",
         get_cwd,
