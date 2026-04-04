@@ -501,7 +501,7 @@ class AgentCore:
                 if not user_input:
                     continue
                 if user_input.lower() in ("quit", "exit", "退出"):
-                    console.print("[bold yellow]🕊️ 愿神与你同在![/]")
+                    console.print("[bold yellow]👋 再见![/]")
                     break
                 if user_input.lower() == "tools":
                     tools = self.list_tools()
@@ -555,11 +555,11 @@ class AgentCore:
                 console.print()
                 response = self.chat_with_tools(user_input)
                 console.print(
-                    Panel(Markdown(response), title="🕊️ 神说", border_style="cyan")
+                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
                 )
 
             except KeyboardInterrupt:
-                console.print("\n[bold yellow]🕊️ 愿神与你同在![/]")
+                console.print("\n[bold yellow]👋 再见![/]")
                 break
             except Exception as e:
                 console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
