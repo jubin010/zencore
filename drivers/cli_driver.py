@@ -1,20 +1,24 @@
 """
-CLI外壳驱动 - 命令行界面
+CLI外壳驱动 - 命令行界面（Rich 美化版）
 通过 api_key 自动判断模型类别：
 - api_key 为空或 "ollama" -> 使用 ollama 原生包
 - 其他 -> 使用 openai SDK
 
-支持思考模式：
-- Ollama: 使用 response.message.thinking
-- OpenAI 兼容 (MiniMax): 使用 reasoning_details 字段
+支持思考模式（thinking）：使用 response.message.thinking 字段
 """
 
 import sys
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+from rich.rule import Rule
 from core.agent import DriverInterface
+
+console = Console()
 
 
 class CLIDriver(DriverInterface):
-    """命令行驱动"""
+    """命令行驱动（Rich 美化版）"""
 
     def __init__(self, model_config: dict = None):
         self.model_config = model_config or {
@@ -67,29 +71,25 @@ class CLIDriver(DriverInterface):
         return ""
 
     def send_message(self, content: str) -> None:
-        print(content)
+        console.print(Markdown(content))
 
     def send_image(self, path: str) -> None:
-        print(f"[图片: {path}]")
+        console.print(f"[bold yellow][图片: {path}][/]")
 
     def send_file(self, path: str) -> None:
-        print(f"[文件: {path}]")
+        console.print(f"[bold yellow][文件: {path}][/]")
 
     def get_input(self, prompt: str = "") -> str:
         try:
-            return input(prompt)
+            return console.input(f"\n[bold green]👤 你:[/] ")
         except EOFError:
             return ""
 
     def show_loading(self, message: str = "处理中..."):
-        print(f"⏳ {message}...")
-        class LoadingCtx:
-            def __enter__(self): return self
-            def __exit__(self, *args): print("✅ 完成")
-        return LoadingCtx()
+        console.print(f"[dim]⏳ {message}...[/]")
 
     def toast(self, message: str, duration: int = 3) -> None:
-        print(f"📢 {message}")
+        console.print(Panel(message, title="📢 提示", border_style="yellow"))
 
     def set_title(self, title: str) -> None:
         pass
@@ -100,7 +100,6 @@ class CLIDriver(DriverInterface):
             client = self._get_client()
             
             if not self.api_key or self.api_key.lower() == "ollama":
-                # Ollama 原生包
                 response = client.chat(
                     model=self.model,
                     messages=messages,
@@ -110,14 +109,13 @@ class CLIDriver(DriverInterface):
                 if self.thinking and hasattr(response.message, 'thinking') and response.message.thinking:
                     thinking = response.message.thinking
                     answer = response.message.content
-                    print(f"\n💭 思考过程:\n{thinking}\n")
-                    print(f"{'─' * 40}")
+                    console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
+                    console.print(Rule(style="dim"))
                     return answer
                 
                 return response.message.content
                 
             else:
-                # OpenAI 兼容接口
                 extra_body = {}
                 if self.thinking:
                     if self.thinking_mode == "reasoning_split":
@@ -134,19 +132,17 @@ class CLIDriver(DriverInterface):
                 
                 message = response.choices[0].message
                 
-                # 处理 MiniMax reasoning_split 模式
                 if self.thinking and self.thinking_mode == "reasoning_split":
                     thinking = self._extract_thinking_from_openai(message)
                     if thinking:
-                        print(f"\n💭 思考过程:\n{thinking}\n")
-                        print(f"{'─' * 40}")
+                        console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
+                        console.print(Rule(style="dim"))
                     return message.content
                 
-                # 处理标准 thinking 模式
                 if self.thinking and hasattr(message, 'thinking') and message.thinking:
                     thinking = message.thinking
-                    print(f"\n💭 思考过程:\n{thinking}\n")
-                    print(f"{'─' * 40}")
+                    console.print(Panel(Markdown(thinking), title="💭 思考过程", border_style="blue"))
+                    console.print(Rule(style="dim"))
                     return message.content
 
                 return message.content

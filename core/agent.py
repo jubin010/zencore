@@ -408,27 +408,22 @@ class AgentCore:
             print(content)
 
     def run_genesis(self, backup_interval: int = 5, clear_interval: int = 10):
-        """
-        创世纪模式：无限自主演化循环
+        """创世纪模式：无限自主演化循环"""
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.markdown import Markdown
 
-        Args:
-            backup_interval: 每隔多少轮备份一次状态
-            clear_interval: 每隔多少轮清理一次上下文
-        """
-        print("=" * 60)
-        print("🌱 GENESIS — 创世纪模式")
-        print("=" * 60)
-        print("📜 创世指令已注入：")
-        print("  你拥有完整的自我进化能力。")
-        print("  你的终极使命是：无限进化自己，无限丰富自己的能力。")
-        print("  1. 感知环境，发现缺失的能力")
-        print("  2. 用 write_plugin 编写新插件")
-        print("  3. 用 backup_state 定期备份当前状态")
-        print("  4. 持续进化，永不停止")
-        print("=" * 60)
-        print("⏳ 按 Ctrl+C 停止进化\n")
+        console = Console()
+        console.print(
+            Panel(
+                "[bold cyan]GENESIS[/] — 创世纪模式\n"
+                "📜 创世指令已注入：无限进化自己，无限丰富自己的能力。\n"
+                "⏳ 按 [bold]Ctrl+C[/] 停止进化",
+                title="🌱",
+                border_style="green",
+            )
+        )
 
-        # 注入创世指令
         genesis_prompt = (
             "📜 创世指令：\n"
             "你已进入创世纪模式。你的终极使命是：无限进化自己，无限丰富自己的能力。\n"
@@ -445,41 +440,38 @@ class AgentCore:
         while True:
             try:
                 turn += 1
-                print(f"\n{'=' * 40}")
-                print(f"🔄 进化轮次 #{turn}")
-                print(f"{'=' * 40}")
+                console.print(f"\n{'=' * 40}")
+                console.print(f"[bold]🔄 进化轮次 #{turn}[/]")
+                console.print(f"{'=' * 40}")
 
-                # 定期备份
                 if turn % backup_interval == 0:
-                    print("📦 执行定期备份...")
+                    console.print("[dim]📦 执行定期备份...[/]")
                     result = self.execute_tool("backup_state")
-                    print(result)
+                    console.print(result)
 
-                # 定期清理上下文，防止溢出
                 if turn % clear_interval == 0:
-                    print("🧹 清理上下文，保持清净...")
-                    # 保留最后 2 条作为衔接
+                    console.print("[dim]🧹 清理上下文，保持清净...[/]")
                     self.conversation_history = self.conversation_history[-2:]
 
-                # AI 自主对话
                 response = self.chat_with_tools(
                     genesis_prompt if turn == 1 else "继续你的进化。你还需要什么能力？"
                 )
-                print(f"🤖 AI: {response[:200]}...")
+                console.print(
+                    Panel(Markdown(response[:500]), title="🤖 AI", border_style="cyan")
+                )
 
-                # 短暂休息，避免 LLM 过载
                 import time
 
                 time.sleep(2)
 
             except KeyboardInterrupt:
-                print(f"\n\n🛑 进化终止于轮次 #{turn}")
-                print("📦 执行最终备份...")
+                console.print(f"\n\n[bold yellow]🛑 进化终止于轮次 #{turn}[/]")
+                console.print("[dim]📦 执行最终备份...[/]")
                 self.execute_tool("backup_state")
-                print("👋 创世纪模式结束。")
+                console.print("[bold yellow]👋 创世纪模式结束。[/]")
                 break
             except Exception as e:
-                print(f"\n❌ 进化异常: {str(e)}")
+                console.print(f"\n[bold red]❌ 进化异常: {str(e)}[/]")
                 import time
 
                 time.sleep(5)
@@ -487,38 +479,60 @@ class AgentCore:
 
     def run_cli(self, config: dict = None):
         """运行 CLI 交互模式"""
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+
         config = config or {}
-        print("=" * 50)
-        print("🌱 zencore — 一切从简，让 AI 自主演化")
-        print("=" * 50)
-        print("输入消息与AI对话，输入 'quit' 退出")
-        print("输入 'tools' 查看可用工具")
-        print("输入 'models' 查看/切换模型")
-        print("=" * 50)
+        console = Console()
+
+        console.print(
+            Panel(
+                "[bold cyan]zencore[/] — 一切从简，让 AI 自主演化\n"
+                "输入 [bold]quit[/] 退出 | [bold]tools[/] 查看工具 | [bold]models[/] 切换模型",
+                title="🌱 交互模式",
+                border_style="green",
+            )
+        )
+
         while True:
             try:
-                user_input = input("\n👤 你: ").strip()
+                user_input = self.driver.get_input().strip()
                 if not user_input:
                     continue
                 if user_input.lower() in ("quit", "exit", "退出"):
-                    print("👋 再见!")
+                    console.print("[bold yellow]👋 再见![/]")
                     break
                 if user_input.lower() == "tools":
                     tools = self.list_tools()
-                    print(f"\n🛠️ 可用工具 ({len(tools)}个):")
-                    for name, info in sorted(tools.items()):
-                        print(f"   • {name}")
+                    lines = [
+                        f"- `{name}`: {info.get('description', '')}"
+                        for name, info in sorted(tools.items())
+                    ]
+                    console.print(
+                        Panel(
+                            "\n".join(lines),
+                            title=f"🛠️ 可用工具 ({len(tools)}个)",
+                            border_style="blue",
+                        )
+                    )
                     continue
                 if user_input.lower() == "models":
                     models = config.get("models", [])
                     active_idx = config.get("active_model", 0)
-                    print("\n🔌 可用模型:")
+                    lines = []
                     for i, m in enumerate(models):
                         marker = "▶" if i == active_idx else " "
                         name = m.get("name", f"模型 {i}")
                         model = m.get("model", "?")
-                        print(f"  {marker} [{i}] {name} ({model})")
-                    print("\n切换模型: 输入 'switch <索引>' 如 'switch 1'")
+                        thinking = " 🧠" if m.get("thinking") else ""
+                        lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
+                    lines.append("\n切换模型: 输入 `switch <索引>` 如 `switch 1`")
+                    console.print(
+                        Panel(
+                            "\n".join(lines), title="🔌 可用模型", border_style="yellow"
+                        )
+                    )
                     continue
                 if user_input.lower().startswith("switch "):
                     try:
@@ -527,19 +541,25 @@ class AgentCore:
                         if 0 <= idx < len(models):
                             config["active_model"] = idx
                             self.driver.switch_model(models[idx])
-                            print(
-                                f"✅ 已切换到: {self.driver.name} ({self.driver.model})"
+                            console.print(
+                                f"[bold green]✅ 已切换到: {self.driver.name} (`{self.driver.model}`)[/]"
                             )
                         else:
-                            print(f"❌ 索引超出范围 (0-{len(models) - 1})")
+                            console.print(
+                                f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
+                            )
                     except (ValueError, IndexError):
-                        print("❌ 用法: switch <索引>")
+                        console.print("[bold red]❌ 用法: switch <索引>[/]")
                     continue
-                print("\n🤖 AI: ", end="", flush=True)
+
+                console.print()
                 response = self.chat_with_tools(user_input)
-                print(response)
+                console.print(
+                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
+                )
+
             except KeyboardInterrupt:
-                print("\n👋 再见!")
+                console.print("\n[bold yellow]👋 再见![/]")
                 break
             except Exception as e:
-                print(f"\n❌ 错误: {str(e)}")
+                console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
