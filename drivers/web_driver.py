@@ -4,10 +4,9 @@ Web外壳驱动 - 基于PyWebIO
 - api_key 为空或 "ollama" -> 使用 ollama 原生包
 - 其他 -> 使用 openai SDK
 
-支持思考模式（thinking）：自动剥离 <think> 标签，展示思考过程
+支持思考模式（thinking）：使用 response.message.thinking 字段
 """
 
-import re
 from pywebio.output import put_text, put_html, put_image, put_file, toast
 from pywebio.input import input, textarea
 from core.agent import DriverInterface
@@ -40,13 +39,6 @@ class WebDriver(DriverInterface):
                 from openai import OpenAI
                 self._client = OpenAI(base_url=f"{self.host}/v1", api_key=self.api_key)
         return self._client
-
-    def _extract_thinking(self, content: str) -> tuple:
-        pattern = r'<think>(.*?)</think>\s*(.*)'
-        match = re.search(pattern, content, re.DOTALL)
-        if match:
-            return match.group(1).strip(), match.group(2).strip()
-        return "", content
 
     def send_message(self, content: str) -> None:
         put_text(content)
@@ -88,7 +80,17 @@ class WebDriver(DriverInterface):
                     messages=messages,
                     think=self.thinking,
                 )
-                content = response["message"]["content"]
+                
+                # 处理思考模式：ollama SDK 返回独立的 thinking 字段
+                if self.thinking and hasattr(response.message, 'thinking') and response.message.thinking:
+                    thinking = response.message.thinking
+                    answer = response.message.content
+                    
+                    put_html(f"<details><summary>💭 思考过程（点击展开）</summary><pre>{thinking}</pre></details>")
+                    return answer
+                
+                return response.message.content
+                
             else:
                 extra_body = {}
                 if self.thinking:
@@ -100,15 +102,7 @@ class WebDriver(DriverInterface):
                     temperature=0.7,
                     extra_body=extra_body,
                 )
-                content = response.choices[0].message.content
-
-            if self.thinking:
-                thinking, answer = self._extract_thinking(content)
-                if thinking:
-                    put_html(f"<details><summary>💭 思考过程（点击展开）</summary><pre>{thinking}</pre></details>")
-                return answer
-
-            return content
+                return response.choices[0].message.content
 
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"

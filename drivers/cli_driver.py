@@ -4,10 +4,9 @@ CLI外壳驱动 - 命令行界面
 - api_key 为空或 "ollama" -> 使用 ollama 原生包
 - 其他 -> 使用 openai SDK
 
-支持思考模式（thinking）：自动剥离 <think> 标签，打印思考过程
+支持思考模式（thinking）：使用 response.message.thinking 字段
 """
 
-import re
 import sys
 from core.agent import DriverInterface
 
@@ -38,14 +37,6 @@ class CLIDriver(DriverInterface):
                 from openai import OpenAI
                 self._client = OpenAI(base_url=f"{self.host}/v1", api_key=self.api_key)
         return self._client
-
-    def _extract_thinking(self, content: str) -> tuple:
-        """提取思考过程，返回 (thinking, answer)"""
-        pattern = r'<think>(.*?)</think>\s*(.*)'
-        match = re.search(pattern, content, re.DOTALL)
-        if match:
-            return match.group(1).strip(), match.group(2).strip()
-        return "", content
 
     def send_message(self, content: str) -> None:
         print(content)
@@ -86,8 +77,20 @@ class CLIDriver(DriverInterface):
                     messages=messages,
                     think=self.thinking,
                 )
-                content = response["message"]["content"]
+                
+                # 处理思考模式：ollama SDK 返回独立的 thinking 字段
+                if self.thinking and hasattr(response.message, 'thinking') and response.message.thinking:
+                    thinking = response.message.thinking
+                    answer = response.message.content
+                    
+                    print(f"\n💭 思考过程:\n{thinking}\n")
+                    print(f"{'─' * 40}")
+                    return answer
+                
+                return response.message.content
+                
             else:
+                # OpenAI 兼容接口
                 extra_body = {}
                 if self.thinking:
                     extra_body["thinking"] = True
@@ -98,17 +101,7 @@ class CLIDriver(DriverInterface):
                     temperature=0.7,
                     extra_body=extra_body,
                 )
-                content = response.choices[0].message.content
-
-            # 处理思考模式：剥离 <think> 标签，打印思考过程
-            if self.thinking:
-                thinking, answer = self._extract_thinking(content)
-                if thinking:
-                    print(f"\n💭 思考过程:\n{thinking}\n")
-                    print(f"{'─' * 40}")
-                return answer
-
-            return content
+                return response.choices[0].message.content
 
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"
