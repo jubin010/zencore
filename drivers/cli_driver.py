@@ -4,7 +4,9 @@ CLI外壳驱动 - 命令行界面
 - api_key 为空或 "ollama" -> 使用 ollama 原生包
 - 其他 -> 使用 openai SDK
 
-支持思考模式（thinking）：使用 response.message.thinking 字段
+支持思考模式：
+- Ollama: 使用 response.message.thinking
+- OpenAI 兼容 (MiniMax): 使用 reasoning_details 字段
 """
 
 import sys
@@ -27,6 +29,7 @@ class CLIDriver(DriverInterface):
         self.model = self.model_config.get("model", "qwen3.5:9b")
         self.api_key = self.model_config.get("api_key", "")
         self.thinking = self.model_config.get("thinking", False)
+        self.thinking_mode = self.model_config.get("thinking_mode", "")
         self._client = None
 
     def switch_model(self, model_config: dict):
@@ -37,7 +40,8 @@ class CLIDriver(DriverInterface):
         self.model = model_config.get("model", "qwen3.5:9b")
         self.api_key = model_config.get("api_key", "")
         self.thinking = model_config.get("thinking", False)
-        self._client = None  # 重置客户端
+        self.thinking_mode = model_config.get("thinking_mode", "")
+        self._client = None
 
     def _get_client(self):
         """懒加载客户端，根据 api_key 自动路由"""
@@ -47,8 +51,20 @@ class CLIDriver(DriverInterface):
                 self._client = ollama.Client(host=self.host)
             else:
                 from openai import OpenAI
-                self._client = OpenAI(base_url=f"{self.host}/v1", api_key=self.api_key)
+                self._client = OpenAI(base_url=self.host, api_key=self.api_key)
         return self._client
+
+    def _extract_thinking_from_openai(self, message) -> str:
+        """从 OpenAI 兼容响应中提取思考内容（MiniMax reasoning_details）"""
+        if hasattr(message, 'reasoning_details') and message.reasoning_details:
+            parts = []
+            for detail in message.reasoning_details:
+                if isinstance(detail, dict) and "text" in detail:
+                    parts.append(detail["text"])
+                elif hasattr(detail, 'text'):
+                    parts.append(detail.text)
+            return "\n".join(parts)
+        return ""
 
     def send_message(self, content: str) -> None:
         print(content)
@@ -84,6 +100,7 @@ class CLIDriver(DriverInterface):
             client = self._get_client()
             
             if not self.api_key or self.api_key.lower() == "ollama":
+                # Ollama 原生包
                 response = client.chat(
                     model=self.model,
                     messages=messages,
@@ -100,9 +117,13 @@ class CLIDriver(DriverInterface):
                 return response.message.content
                 
             else:
+                # OpenAI 兼容接口
                 extra_body = {}
                 if self.thinking:
-                    extra_body["thinking"] = True
+                    if self.thinking_mode == "reasoning_split":
+                        extra_body["reasoning_split"] = True
+                    else:
+                        extra_body["thinking"] = True
                 
                 response = client.chat.completions.create(
                     model=self.model,
@@ -110,7 +131,25 @@ class CLIDriver(DriverInterface):
                     temperature=0.7,
                     extra_body=extra_body,
                 )
-                return response.choices[0].message.content
+                
+                message = response.choices[0].message
+                
+                # 处理 MiniMax reasoning_split 模式
+                if self.thinking and self.thinking_mode == "reasoning_split":
+                    thinking = self._extract_thinking_from_openai(message)
+                    if thinking:
+                        print(f"\n💭 思考过程:\n{thinking}\n")
+                        print(f"{'─' * 40}")
+                    return message.content
+                
+                # 处理标准 thinking 模式
+                if self.thinking and hasattr(message, 'thinking') and message.thinking:
+                    thinking = message.thinking
+                    print(f"\n💭 思考过程:\n{thinking}\n")
+                    print(f"{'─' * 40}")
+                    return message.content
+
+                return message.content
 
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"

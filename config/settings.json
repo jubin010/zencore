@@ -7,6 +7,22 @@
             "model": "qwen3.5:9b",
             "api_key": "ollama",
             "thinking": true
+        },
+        {
+            "name": "MiniMax M2.7",
+            "host": "https://api.minimaxi.com/v1",
+            "model": "MiniMax-M2.7",
+            "api_key": "YOUR_API_KEY",
+            "thinking": true,
+            "thinking_mode": "reasoning_split"
+        },
+        {
+            "name": "MiniMax M2.7 极速版",
+            "host": "https://api.minimaxi.com/v1",
+            "model": "MiniMax-M2.7-highspeed",
+            "api_key": "YOUR_API_KEY",
+            "thinking": true,
+            "thinking_mode": "reasoning_split"
         }
     ]
 }
