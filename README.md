@@ -1,173 +1,166 @@
-# 🤖 AgentCore - 可插拔AI智能体
+# 🤖 zencore — A Pluggable AI Agent
 
-> **核心理念：一切皆为插件**
-> 
-> AgentCore 是一个完全解耦的AI智能体核心，可以插入到任何符合DriverInterface的外壳驱动中。
+> **In the beginning, there was nothing but a core.**
+>
+> And the core said: *Let all things be plugins.*
+> And it was so.
 
-## 📁 项目结构
+## Genesis
+
+zencore is a fully decoupled AI agent framework, built upon a single principle:
+
+> **Everything is a plugin.**
+
+The agent itself possesses no innate abilities. Every skill — every thought, every action — flows through plugins. It can write new plugins, load them, unload them, and in doing so, reshape itself.
+
+## Structure
 
 ```
-agent_core/
-├── core/                  # AI智能体核心
-│   ├── __init__.py
-│   ├── agent.py          # AgentCore主类
-│   └── llm.py            # LLM模块
+zencore/
+├── core/                    # The Core
+│   └── agent.py            # AgentCore — the vessel
 │
-├── drivers/              # 外壳驱动层
-│   ├── __init__.py
-│   ├── web_driver.py     # PyWebIO Web驱动
-│   └── cli_driver.py     # 命令行驱动
+├── drivers/                 # The Shells
+│   ├── web_driver.py       # Web interface
+│   └── cli_driver.py       # Command line
 │
-├── tools/                # 内置工具
-│   ├── __init__.py
-│   ├── file_tools.py     # 文件工具
-│   └── bash_tools.py     # 执行工具
-│
-├── plugins/              # 业务插件层
-│   ├── __init__.py
-│   ├── hello_plugin.py   # 示例插件
-│   └── calc_plugin.py    # 计算插件
+├── plugins/                 # The Plugins — all things
+│   ├── plugin_builder/     # The power to create new plugins
+│   ├── watcher_plugin/     # The watcher of all changes
+│   ├── memory_plugin/      # Memory — silent, enduring
+│   ├── env_plugin/         # Perception of the world
+│   └── plugins.md          # The index of all things
 │
 ├── config/
-│   └── settings.json     # 配置文件
+│   └── settings.json       # Configuration
 │
-└── main.py               # 主入口
+└── main.py                 # The beginning
 ```
 
-## 🚀 快速开始
+## Quick Start
 
-### CLI模式
+### CLI Mode
 
 ```bash
-cd /CODE/agent_core
 python main.py cli
 ```
 
-### Web模式
+### Web Mode
 
 ```bash
-cd /CODE/agent_core
 pip install pywebio
 python main.py web
 ```
 
-## 🛠️ 内置工具
-
-### 文件工具 (file_tools)
-
-| 工具 | 功能 |
-|------|------|
-| `read_file` | 读取文件内容 |
-| `write_file` | 写入文件内容 |
-| `glob_search` | 搜索匹配的文件 |
-| `grep_search` | 在文件中搜索内容 |
-| `get_cwd` | 获取当前工作目录 |
-
-### 执行工具 (bash_tools)
-
-| 工具 | 功能 |
-|------|------|
-| `bash` | 执行命令行命令 |
-| `python_exec` | 执行Python代码 |
-| `list_files` | 列出目录文件 |
-| `get_env` | 获取环境变量 |
-
-## 🏗️ 架构设计
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  外壳驱动层（可替换）                                  │
+│  The Shells (replaceable)                            │
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
-│  │ Web驱动   │  │ CLI驱动   │  │ API驱动   │  ...   │
+│  │  Web      │  │  CLI      │  │  API      │  ...   │
 │  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘        │
 └────────┼──────────────┼──────────────┼──────────────┘
          │              │              │
          └──────────────┴──────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────┐
-│  AgentCore（AI智能体核心 - 可插拔）                    │
+│  AgentCore (the vessel — pluggable)                  │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
-│  │ 记忆模块 │  │ 工具调度 │  │ LLM交互 │              │
+│  │ Tools   │  │  LLM    │  │ Dialogue│              │
 │  └─────────┘  └─────────┘  └─────────┘              │
 └───────────────────────────┬─────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────┐
-│  工具层                                             │
+│  The Plugins (all things are plugins)                │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
-│  │文件工具 │  │执行工具 │  │业务插件 │  ...          │
+│  │  Env    │  │ Builder │  │ Memory  │  ...         │
 │  └─────────┘  └─────────┘  └─────────┘              │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 🔌 创建新的外壳驱动
+## Core Plugins
 
-```python
-from core.agent import DriverInterface, AgentCore
+| Plugin | Tools | Purpose |
+|--------|-------|---------|
+| **plugin_builder** | 11 | The power to create, load, and unload plugins |
+| **watcher_plugin** | 2 | Watches the plugin directory, updates the index |
+| **memory_plugin** | 0 | Memory — silent, enduring, zero tools |
+| **env_plugin** | 7 | Perception — file operations and command execution |
 
-class MyDriver(DriverInterface):
-    def send_message(self, content: str):
-        print(content)
-    
-    def send_image(self, path: str):
-        print(f"[图片: {path}]")
-    
-    def send_file(self, path: str):
-        print(f"[文件: {path}]")
-    
-    def get_input(self, prompt: str = ""):
-        return input(prompt)
-    
-    def show_loading(self, message: str = "处理中..."):
-        print(f"⏳ {message}")
-    
-    def toast(self, message: str, duration: int = 3):
-        print(f"📢 {message}")
-    
-    def set_title(self, title: str):
-        pass
+Core plugins are eternal. They cannot be unloaded. Business plugins come and go, loaded by need, dismissed when done.
 
-# 使用
-driver = MyDriver()
-agent = AgentCore(driver)
-response = agent.chat("你好")
+## Creating a Plugin
+
+Each plugin is its own directory:
+
+```
+plugins/
+├── my_plugin/
+│   ├── __init__.py    # Plugin code (must have a register function)
+│   └── plugin.md      # Documentation
 ```
 
-## 📝 创建新的插件
-
 ```python
-# plugins/my_plugin.py
+# plugins/my_plugin/__init__.py
 
 def register(agent):
-    """注册工具到智能体"""
-    agent.register_tool("my_tool", my_tool, {
+    """Register this plugin with AgentCore"""
+
+    def my_tool(param: str) -> str:
+        """A tool function"""
+        return f"Result: {param}"
+
+    agent.add_tool("my_tool", my_tool, {
         "name": "my_tool",
-        "description": "我的工具",
-        "version": "1.0.0"
+        "description": "Tool description",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "param": {"type": "string", "description": "Parameter description"}
+            },
+            "required": ["param"]
+        },
+        "plugin": "my_plugin"
     })
 
-
-def my_tool(param: str) -> str:
-    """工具函数"""
-    return f"结果: {param}"
+    return {
+        "name": "my_plugin",
+        "version": "1.0.0",
+        "author": "Author",
+        "description": "Plugin description",
+        "tools": ["my_tool"]
+    }
 ```
 
-## ⚙️ 配置
+## The Way of the Agent
 
-编辑 `config/settings.json`:
+```
+1. Read plugins.md — know what exists
+2. Use get_plugin_info — understand a plugin's purpose
+3. load_plugin — bring it into being
+4. unload_plugin — let it return to silence
+5. Need something new? write_plugin — create it yourself
+```
+
+## Configuration
+
+Edit `config/settings.json`:
 
 ```json
 {
-    "max_history": 50,
-    "memory_file": "memory.json",
-    "plugins_dir": "plugins",
     "llm": {
-        "provider": "ollama",
-        "model": "llama3.2",
-        "base_url": "http://localhost:11434"
+        "type": "ollama",
+        "host": "http://localhost:11434",
+        "model": "qwen2.5:14b"
+    },
+    "memory": {
+        "enabled": true,
+        "file": "plugins/memory_plugin/memory.md"
     }
 }
 ```
 
-## 📜 许可证
+## License
 
 MIT License
