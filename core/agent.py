@@ -446,9 +446,3 @@ class AgentCore:
                 break
             except Exception as e:
                 print(f"\n❌ 错误: {str(e)}")
-
-    def run_web(self, host: str = "0.0.0.0", port: int = 8080):
-        from drivers.web_driver import WebDriver
-
-        driver = WebDriver(self)
-        driver.run(host, port)
