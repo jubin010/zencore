@@ -49,6 +49,13 @@ class DriverInterface:
         """显示提示"""
         raise NotImplementedError
 
+    def call_llm(self, messages: list) -> str:
+        """
+        调用 LLM — 由外壳驱动实现
+        外壳决定连接哪个 LLM、用什么模型
+        """
+        raise NotImplementedError
+
 
 class ToolRegistry:
     """工具注册表 - 管理所有可用工具"""
@@ -113,11 +120,6 @@ class AgentCore:
         self.driver = driver
         self.config = config or {}
         self.tool_registry = ToolRegistry()
-
-        # LLM配置
-        self.llm_provider = self.config.get("llm_provider", "ollama")
-        self.llm_model = self.config.get("llm_model", "qwen2.5:7b")
-        self.llm_base_url = self.config.get("llm_base_url", "http://localhost:11434")
 
         # 上下文
         self.conversation_history = []
@@ -500,66 +502,15 @@ class AgentCore:
         return "❌ 对话超时，已达到最大轮次限制"
 
     def _call_llm(self, prompt: str) -> str:
-        """调用LLM服务"""
-        if self.llm_provider == "ollama":
-            return self._call_ollama(prompt)
-        elif self.llm_provider == "openai":
-            return self._call_openai(prompt)
+        """调用LLM — 委托给外壳驱动"""
+        if self.driver and hasattr(self.driver, "call_llm"):
+            try:
+                messages = json.loads(prompt)
+                return self.driver.call_llm(messages)
+            except Exception as e:
+                return f"❌ LLM调用失败: {str(e)}\n{traceback.format_exc()}"
         else:
-            return f"❌ 不支持的LLM提供商: {self.llm_provider}"
-
-    def _call_ollama(self, prompt: str) -> str:
-        """调用Ollama LLM"""
-        try:
-            import urllib.request
-            import urllib.error
-
-            url = f"{self.llm_base_url}/api/chat"
-            data = json.loads(prompt)  # prompt本身是JSON格式的消息列表
-
-            payload = {"model": self.llm_model, "messages": data, "stream": False}
-
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-
-            with urllib.request.urlopen(req, timeout=120) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                return result.get("message", {}).get("content", "")
-
-        except Exception as e:
-            return f"❌ LLM调用失败: {str(e)}\n{traceback.format_exc()}"
-
-    def _call_openai(self, prompt: str) -> str:
-        """调用OpenAI兼容LLM"""
-        try:
-            import urllib.request
-            import urllib.error
-
-            url = f"{self.llm_base_url}/v1/chat/completions"
-            data = json.loads(prompt)
-
-            payload = {"model": self.llm_model, "messages": data}
-
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.config.get('api_key', '')}",
-                },
-            )
-
-            with urllib.request.urlopen(req, timeout=120) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                return (
-                    result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                )
-
-        except Exception as e:
-            return f"❌ LLM调用失败: {str(e)}"
+            return "❌ 外壳驱动未实现 call_llm 方法"
 
     def _extract_tool_call(self, response: str) -> Optional[Dict]:
         """从LLM响应中提取工具调用"""
