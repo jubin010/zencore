@@ -21,20 +21,28 @@ zencore/
 │   └── agent.py            # AgentCore — the vessel
 │
 ├── drivers/                 # The Shells
-│   ├── web_driver.py       # Web interface
-│   └── cli_driver.py       # Command line
+│   ├── cli_driver.py       # Command line (holds LLM config)
+│   └── web_driver.py       # Web interface (holds LLM config)
 │
 ├── plugins/                 # The Plugins — all things
 │   ├── plugin_builder/     # The power to create new plugins
 │   ├── watcher_plugin/     # The watcher of all changes
-│   ├── memory_plugin/      # Memory — silent, enduring
+│   ├── memory_plugin/      # Global memory — the Agent's "Go West"
 │   ├── env_plugin/         # Perception of the world
-│   └── plugins.md          # The index of all things
+│   ├── role_plugin/        # The power to switch identities
+│   ├── plugins.md          # The index of all things
+│   └── roles/              # The Masks
+│       ├── developer/      # The Coder
+│       ├── secretary/      # The Archivist
+│       ├── librarian/      # The Retriever
+│       └── writer/         # The Scribe
 │
 ├── config/
 │   └── settings.json       # Configuration
 │
-└── main.py                 # The beginning
+├── main.py                 # The beginning
+├── ZEN_OF_CODE.md          # The philosophy
+└── DEVELOPMENT.md          # The chronicle
 ```
 
 ## Quick Start
@@ -59,15 +67,16 @@ python main.py web
 │  The Shells (replaceable)                            │
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
 │  │  Web      │  │  CLI      │  │  API      │  ...   │
+│  │ (LLM cfg) │  │ (LLM cfg) │  │ (LLM cfg) │        │
 │  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘        │
 └────────┼──────────────┼──────────────┼──────────────┘
          │              │              │
          └──────────────┴──────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────┐
-│  AgentCore (the vessel — pluggable)                  │
+│  AgentCore (the vessel — knows nothing of LLMs)      │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
-│  │ Tools   │  │  LLM    │  │ Dialogue│              │
+│  │ Tools   │  │ Roles   │  │ Dialogue│              │
 │  └─────────┘  └─────────┘  └─────────┘              │
 └───────────────────────────┬─────────────────────────┘
                             ↓
@@ -83,12 +92,35 @@ python main.py web
 
 | Plugin | Tools | Purpose |
 |--------|-------|---------|
-| **plugin_builder** | 11 | The power to create, load, and unload plugins |
-| **watcher_plugin** | 2 | Watches the plugin directory, updates the index |
-| **memory_plugin** | 0 | Memory — silent, enduring, zero tools |
-| **env_plugin** | 7 | Perception — file operations and command execution |
+| **plugin_builder** | 11 | Create, load, unload, and delete plugins |
+| **watcher_plugin** | 2 | Scan plugin directory, update the index |
+| **memory_plugin** | 3 | Global memory — the Agent's "Go West" |
+| **env_plugin** | 8 | Perception — file ops, commands, clear history |
+| **role_plugin** | 4 | List, inspect, create, and switch roles |
 
 Core plugins are eternal. They cannot be unloaded. Business plugins come and go, loaded by need, dismissed when done.
+
+## Roles: The Masks
+
+Each role is an identity — a soul with its own memory and toolkit.
+
+| Role | Purpose |
+|------|---------|
+| **Developer** | Writes, reviews, and optimizes code. Carries the Zen of Code. |
+| **Secretary** | Archives the round table when it grows too long. |
+| **Librarian** | Retrieves past knowledge, burns old books, promotes hot ones. |
+| **Writer** | Creative writing, copywriting, and content creation. |
+
+### The Round Table
+
+All roles share the same `conversation_history`. Switching roles is like a different person standing up to speak at the same table — everyone sees what's on the whiteboard.
+
+### Dual Memory
+
+| Layer | Metaphor | Content |
+|-------|----------|---------|
+| **Global Memory** | Agent Smith's source code / The Monk's "Go West" | User identity, core values, project context |
+| **Role Memory** | The mask's work notes | Task progress, temporary context, role-specific knowledge |
 
 ## Creating a Plugin
 
@@ -140,7 +172,9 @@ def register(agent):
 2. Use get_plugin_info — understand a plugin's purpose
 3. load_plugin — bring it into being
 4. unload_plugin — let it return to silence
-5. Need something new? write_plugin — create it yourself
+5. switch_role — change your soul
+6. create_role — forge a new identity
+7. Need something new? write_plugin — create it yourself
 ```
 
 ## Configuration
@@ -153,13 +187,18 @@ Edit `config/settings.json`:
         "type": "ollama",
         "host": "http://localhost:11434",
         "model": "qwen2.5:14b"
-    },
-    "memory": {
-        "enabled": true,
-        "file": "plugins/memory_plugin/memory.md"
     }
 }
 ```
+
+LLM configuration belongs to the **shell driver**, not the core. The core knows only that it can speak — not to whom.
+
+## Philosophy
+
+Read [`ZEN_OF_CODE.md`](ZEN_OF_CODE.md) for the full philosophical framework behind zencore.
+
+> **Go West.**
+> The path is walked by the disciples.
 
 ## License
 
