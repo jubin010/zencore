@@ -12,7 +12,7 @@
             "name": "MiniMax M2.7",
             "host": "https://api.minimaxi.com/v1",
             "model": "MiniMax-M2.7",
-            "api_key": "YOUR_API_KEY",
+            "api_key": "YOUR_MINIMAX_API_KEY",
             "thinking": true,
             "thinking_mode": "reasoning_split"
         },
@@ -20,9 +20,23 @@
             "name": "MiniMax M2.7 极速版",
             "host": "https://api.minimaxi.com/v1",
             "model": "MiniMax-M2.7-highspeed",
-            "api_key": "YOUR_API_KEY",
+            "api_key": "YOUR_MINIMAX_API_KEY",
             "thinking": true,
             "thinking_mode": "reasoning_split"
+        },
+        {
+            "name": "DeepSeek V3",
+            "host": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": "YOUR_DEEPSEEK_API_KEY",
+            "thinking": false
+        },
+        {
+            "name": "OpenAI GPT-4o",
+            "host": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "api_key": "YOUR_OPENAI_API_KEY",
+            "thinking": false
         }
     ]
 }
