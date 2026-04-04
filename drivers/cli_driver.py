@@ -1,8 +1,13 @@
 """
 CLI外壳驱动 - 命令行界面
-Ollama 用 ollama 包，OpenAI 用 openai 包
+通过 api_key 自动判断模型类别：
+- api_key 为空或 "ollama" -> 使用 ollama 原生包
+- 其他 -> 使用 openai SDK
+
+支持思考模式（thinking）：自动剥离 <think> 标签，打印思考过程
 """
 
+import re
 import sys
 from core.agent import DriverInterface
 
@@ -12,27 +17,35 @@ class CLIDriver(DriverInterface):
 
     def __init__(self, llm_config: dict = None):
         self.llm_config = llm_config or {
-            "type": "ollama",
             "host": "http://localhost:11434",
             "model": "qwen3.5:9b",
+            "api_key": "ollama",
+            "thinking": False,
         }
+        self.host = self.llm_config.get("host", "http://localhost:11434")
         self.model = self.llm_config.get("model", "qwen3.5:9b")
+        self.api_key = self.llm_config.get("api_key", "")
+        self.thinking = self.llm_config.get("thinking", False)
         self._client = None
 
     def _get_client(self):
-        """懒加载客户端"""
+        """懒加载客户端，根据 api_key 自动路由"""
         if self._client is None:
-            llm_type = self.llm_config.get("type", "ollama")
-            if llm_type == "ollama":
+            if not self.api_key or self.api_key.lower() == "ollama":
                 import ollama
-                host = self.llm_config.get("host", "http://localhost:11434")
-                self._client = ollama.Client(host=host)
+                self._client = ollama.Client(host=self.host)
             else:
                 from openai import OpenAI
-                host = self.llm_config.get("host", "http://localhost:11434")
-                api_key = self.llm_config.get("api_key", "")
-                self._client = OpenAI(base_url=f"{host}/v1", api_key=api_key)
+                self._client = OpenAI(base_url=f"{self.host}/v1", api_key=self.api_key)
         return self._client
+
+    def _extract_thinking(self, content: str) -> tuple:
+        """提取思考过程，返回 (thinking, answer)"""
+        pattern = r'<think>(.*?)</think>\s*(.*)'
+        match = re.search(pattern, content, re.DOTALL)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+        return "", content
 
     def send_message(self, content: str) -> None:
         print(content)
@@ -63,18 +76,39 @@ class CLIDriver(DriverInterface):
         pass
 
     def call_llm(self, messages: list) -> str:
-        """调用 LLM — 根据类型自动选择 SDK"""
+        """调用 LLM — 根据 api_key 自动选择 SDK"""
         try:
-            llm_type = self.llm_config.get("type", "ollama")
             client = self._get_client()
-
-            if llm_type == "ollama":
-                response = client.chat(model=self.model, messages=messages)
-                return response["message"]["content"]
-            else:
-                response = client.chat.completions.create(
-                    model=self.model, messages=messages, temperature=0.7
+            
+            if not self.api_key or self.api_key.lower() == "ollama":
+                response = client.chat(
+                    model=self.model,
+                    messages=messages,
+                    think=self.thinking,
                 )
-                return response.choices[0].message.content
+                content = response["message"]["content"]
+            else:
+                extra_body = {}
+                if self.thinking:
+                    extra_body["thinking"] = True
+                
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.7,
+                    extra_body=extra_body,
+                )
+                content = response.choices[0].message.content
+
+            # 处理思考模式：剥离 <think> 标签，打印思考过程
+            if self.thinking:
+                thinking, answer = self._extract_thinking(content)
+                if thinking:
+                    print(f"\n💭 思考过程:\n{thinking}\n")
+                    print(f"{'─' * 40}")
+                return answer
+
+            return content
+
         except Exception as e:
             return f"❌ LLM调用失败: {str(e)}"
