@@ -84,16 +84,18 @@ class InstinctRegistry:
     def __init__(self):
         self._instincts: list = []
 
-    def register(self, name: str, condition: Callable, prompt: str):
+    def register(self, name: str, condition: Callable, prompt_func: Callable):
         """
         注册本能
 
         Args:
             name: 本能名称
             condition: 返回 True/False 的函数，决定本能是否激活
-            prompt: 激活时注入 System Prompt 的文本
+            prompt_func: 返回本能注入文本的函数（动态生成）
         """
-        self._instincts.append({"name": name, "condition": condition, "prompt": prompt})
+        self._instincts.append(
+            {"name": name, "condition": condition, "prompt_func": prompt_func}
+        )
 
     def evaluate(self) -> str:
         """评估所有本能，返回激活的本能文本"""
@@ -101,7 +103,7 @@ class InstinctRegistry:
         for instinct in self._instincts:
             try:
                 if instinct["condition"]():
-                    lines.append(instinct["prompt"])
+                    lines.append(instinct["prompt_func"]())
             except:
                 pass
         return "\n".join(lines) if lines else ""
@@ -305,6 +307,9 @@ class AgentCore:
         lessons = self._load_lessons(self._current_role)
         instincts = self.instinct_registry.evaluate()
 
+        # 当前状态上下文（供本能驱使时知道"我是谁"、"笔在哪"）
+        current_context = f"当前角色: `{self._current_role or '无'}` | 角色记忆: `{self._current_role_memory_file or '无'}` | 本体记忆: `{self._global_memory_file}`"
+
         system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
 
 ## 你的身份
@@ -330,6 +335,17 @@ class AgentCore:
 {lessons}
 
 {instincts}
+
+## 当前状态
+
+{current_context}
+
+## 本能认知指南
+
+本能是系统注入的潜意识信号（如拥挤、挫败）。
+- **本能 = 感觉**：告诉你"哪里不舒服"。
+- **角色 = 解药**：查阅 `plugins/roles/` 下的角色说明，找到能缓解该本能的角色。
+- **行动**：切换到对应角色，利用其工具消除不适。
 
 ## 响应格式
 
@@ -392,6 +408,8 @@ class AgentCore:
     def chat_with_tools(self, message: str) -> str:
         self.add_message("user", message)
         self._consecutive_failures = 0
+        total_failures = 0
+        MAX_TOTAL_FAILURES = 50  # 安全熔断：给 AI 充足的尝试机会
 
         # 无限循环：由本能驱动，直到完成任务或用户打断
         while True:
@@ -399,6 +417,10 @@ class AgentCore:
             if getattr(self, "_stop_flag", False):
                 self._stop_flag = False
                 return "🛑 思考被用户打断。"
+
+            # 安全熔断
+            if total_failures >= MAX_TOTAL_FAILURES:
+                return f"❌ 已达到最大尝试次数 ({MAX_TOTAL_FAILURES})。我可能陷入了死循环，请人类协助。"
 
             llm_response = self._call_llm(self._build_prompt(""))
             tool_call = self._extract_tool_call(llm_response)
@@ -414,6 +436,7 @@ class AgentCore:
             # 更新失败计数（供本能插件读取）
             if tool_result.startswith("❌ [ERROR]"):
                 self._consecutive_failures += 1
+                total_failures += 1
             else:
                 self._consecutive_failures = 0
 
