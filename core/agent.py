@@ -270,10 +270,19 @@ class AgentCore:
         else:
             return f"❌ [ERROR] tool: {name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
 
-    def add_message(self, role: str, content: str):
-        self.conversation_history.append(
-            {"role": role, "content": content, "timestamp": datetime.now().isoformat()}
-        )
+    def add_message(self, role: str, content: str = None, **kwargs):
+        """
+        统一的消息添加入口 — 始终产出 OpenAI 兼容格式
+
+        Args:
+            role: user / assistant / tool / system
+            content: 文本内容（工具调用时为 None）
+            **kwargs: 额外字段（如 tool_calls, tool_call_id 等）
+        """
+        msg = {"role": role, "content": content}
+        msg.update(kwargs)
+
+        self.conversation_history.append(msg)
         if len(self.conversation_history) > self.max_history:
             self.conversation_history = self.conversation_history[-self.max_history :]
 
@@ -435,24 +444,32 @@ class AgentCore:
             tool_id = str(uuid.uuid4())  # 生成 tool_call_id 供 MiniMax 等 API 使用
 
             # 以 OpenAI 兼容格式存储 assistant 消息（含 tool_calls）
-            self.conversation_history.append(
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": tool_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": json.dumps(
-                                    tool_params, ensure_ascii=False
-                                ),
-                            },
-                        }
-                    ],
-                }
+            self.add_message(
+                "assistant",
+                content=None,
+                tool_calls=[
+                    {
+                        "id": tool_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(tool_params, ensure_ascii=False),
+                        },
+                    }
+                ],
             )
+
+            tool_result = self.execute_tool(tool_name, **tool_params)
+
+            # 更新失败计数（供本能插件读取）
+            if tool_result.startswith("❌ [ERROR]"):
+                self._consecutive_failures += 1
+                total_failures += 1
+            else:
+                self._consecutive_failures = 0
+
+            # 以 OpenAI 兼容格式存储 tool 消息（含 tool_call_id 匹配）
+            self.add_message("tool", content=tool_result, tool_call_id=tool_id)
 
             tool_result = self.execute_tool(tool_name, **tool_params)
 

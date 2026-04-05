@@ -110,9 +110,50 @@ class CLIDriver(DriverInterface):
             client = self._get_client()
 
             if not self.api_key or self.api_key.lower() == "ollama":
+                # Ollama SDK 要求 arguments 是 dict 而非 JSON 字符串
+                # 需要将 OpenAI 格式转换为 Ollama 格式
+                ollama_messages = []
+                for msg in messages:
+                    if msg.get("role") == "assistant" and "tool_calls" in msg:
+                        converted_tc = []
+                        for tc in msg["tool_calls"]:
+                            fn = tc.get("function", {})
+                            args = fn.get("arguments", "{}")
+                            # 字符串 → dict
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {}
+                            converted_tc.append(
+                                {
+                                    "function": {
+                                        "name": fn.get("name", ""),
+                                        "arguments": args,
+                                    }
+                                }
+                            )
+                        ollama_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": msg.get("content") or "",
+                                "tool_calls": converted_tc,
+                            }
+                        )
+                    elif msg.get("role") == "tool":
+                        ollama_messages.append(
+                            {
+                                "role": "tool",
+                                "content": msg.get("content", ""),
+                                "tool_call_id": msg.get("tool_call_id", ""),
+                            }
+                        )
+                    else:
+                        ollama_messages.append(msg)
+
                 response = client.chat(
                     model=self.model,
-                    messages=messages,
+                    messages=ollama_messages,
                     think=self.thinking,
                 )
 
