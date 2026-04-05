@@ -59,6 +59,26 @@ zencore 的设计遵循"禅意"原则：**少即是多，一切皆插件**。
 - **实现**：`agent.py` 不包含 `rich` 或其他渲染库。所有 UI 逻辑在 `main.py` 和 `Driver` 中处理。
 - **收益**：核心可无缝集成到任何环境（终端、Web、微信、API）。
 
+### 2.8 原生 tool_calls 架构
+- **问题**：早期使用 JSON 文本解析提取工具调用（`{"tool": "xxx", "params": {...}}`），与 OpenAI 兼容格式不匹配，导致 MiniMax 等模型返回 XML 格式工具调用时解析失败。
+- **解决**：
+  - `DriverInterface.call_llm()` 改为返回结构化响应：`{"content", "tool_calls", "thinking"}`
+  - `cli_driver.py` 提取 OpenAI SDK 返回的原生 `tool_calls`，统一转为标准格式
+  - `agent.py` 的 `chat_with_tools()` 直接使用原生 `tool_calls`，不再依赖文本解析
+  - 新增 `_build_tools_schema()` 构建 OpenAI 兼容的 tools schema 传入 LLM
+- **收益**：
+  - 完美支持 MiniMax M2.7、Ollama 等模型的原生工具调用
+  - `tool_call_id` 严格匹配，符合 OpenAI 标准
+  - 删除了脆弱的 `_extract_tool_call()` JSON 解析逻辑
+
+### 2.9 角色切换 Bug 修复
+- **问题**：`switch_role` 将 `role.md` 全文内容存入 `agent._current_role`，导致 `_load_lessons()` 拼接路径时产生超长文件名（`OSError: File name too long`）。
+- **解决**：`_current_role` 只存储角色名（如 `"developer"`），而非全文。角色描述在返回值中展示，不存入状态变量。
+
+### 2.10 工具执行去重
+- **问题**：`chat_with_tools()` 中工具执行代码重复，导致同一工具被调用两次。
+- **解决**：删除重复的工具执行和消息添加代码块。
+
 ## 3. 目录结构规范
 
 ### 3.1 插件结构
@@ -107,6 +127,7 @@ def register(agent):
 
 ### 4.2 热载入机制
 - `load_plugin` 会先清理该插件的旧工具，再从磁盘重新加载。
+- 非核心插件加载时自动卸载上一个非核心插件（单槽机制）。
 - 失败时返回明确错误信息（如语法错误行号），方便 AI 自我修复。
 
 ## 5. AI 工作流
@@ -138,6 +159,25 @@ def register(agent):
 | **Secretary** | 上下文归档 | 拥挤、微扰 |
 | **Librarian** | 记忆检索 | 挫败、微扰 |
 | **Auditor** | 错误监督 | 挫败 |
+
+## 8. 测试记录
+
+### 8.1 MiniMax M2.7 多轮工具调用测试
+- **状态**：✅ 通过
+- **内容**：单轮工具调用、多轮连续调用、纯文字回复、消息格式验证
+- **关键**：原生 `tool_calls` 提取，`tool_call_id` 严格匹配
+
+### 8.2 全核心功能 + 记忆测试
+- **状态**：✅ 41/41 通过
+- **内容**：插件加载、工具执行、本能系统、消息格式、历史截断、记忆读写追加、角色切换、记忆隔离、Prompt 注入
+
+### 8.3 热载入 + 上下文污染测试
+- **状态**：✅ 17/17 通过
+- **内容**：插件代码修改后热载入生效、多次 load_plugin 不重复注册、工具描述在 prompt 中不重复
+
+### 8.4 记忆召回测试
+- **状态**：✅ 6/6 通过（2个因 API 429 限流跳过）
+- **内容**：写入后召回、追加后召回、跨角色召回、多轮自然召回、重启后持久化、clear_history 不影响记忆文件
 
 ---
 *最后更新: 2026-04-05*

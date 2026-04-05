@@ -27,7 +27,12 @@ def register(agent):
             role_file = r / "role.md"
             desc = ""
             if role_file.exists():
-                desc = role_file.read_text(encoding="utf-8").split("\n")[0].lstrip("#").strip()
+                desc = (
+                    role_file.read_text(encoding="utf-8")
+                    .split("\n")[0]
+                    .lstrip("#")
+                    .strip()
+                )
             lines.append(f"  `{r.name}` — {desc}")
 
         return "\n".join(lines)
@@ -65,10 +70,12 @@ def register(agent):
 
         return "\n".join(lines)
 
-    def create_role(role_name: str, role_md: str, plugins_json: str = "[]", memory_md: str = "") -> str:
+    def create_role(
+        role_name: str, role_md: str, plugins_json: str = "[]", memory_md: str = ""
+    ) -> str:
         """
         创造新角色
-        
+
         Args:
             role_name: 角色名
             role_md: 角色身份描述（Markdown）
@@ -87,12 +94,16 @@ def register(agent):
                     plugins = []
             except:
                 plugins = []
-            (role_dir / "plugins.json").write_text(json.dumps(plugins, ensure_ascii=False, indent=2), encoding="utf-8")
+            (role_dir / "plugins.json").write_text(
+                json.dumps(plugins, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
             if memory_md:
                 (role_dir / "memory.md").write_text(memory_md, encoding="utf-8")
             else:
-                (role_dir / "memory.md").write_text(f"# {role_name} 记忆\n\n（记忆为空）", encoding="utf-8")
+                (role_dir / "memory.md").write_text(
+                    f"# {role_name} 记忆\n\n（记忆为空）", encoding="utf-8"
+                )
 
             return f"✅ 角色 `{role_name}` 已创造"
         except Exception as e:
@@ -107,10 +118,8 @@ def register(agent):
         if not role_dir.is_dir():
             return f"❌ 角色不存在: {role_name}"
 
-        # 1. 设置角色身份
-        role_file = role_dir / "role.md"
-        if role_file.exists():
-            agent._current_role = role_file.read_text(encoding="utf-8")
+        # 1. 设置角色身份（存储角色名，而非全文）
+        agent._current_role = role_name
 
         # 2. 切换角色记忆路径
         memory_file = role_dir / "memory.md"
@@ -119,19 +128,26 @@ def register(agent):
         else:
             agent._current_role_memory_file = ""
 
-        # 3. 读取插件清单（供 AI 参考）
+        # 3. 读取角色描述和插件清单（供 AI 参考）
+        role_desc = ""
+        role_file = role_dir / "role.md"
+        if role_file.exists():
+            role_desc = role_file.read_text(encoding="utf-8")
+
         plugins_file = role_dir / "plugins.json"
         plugins_info = ""
         if plugins_file.exists():
             plugins = json.loads(plugins_file.read_text(encoding="utf-8"))
             if plugins:
-                plugins_info = f"\n\n所需插件: {', '.join(plugins)}\n请用 load_plugin 逐一加载"
+                plugins_info = (
+                    f"\n\n所需插件: {', '.join(plugins)}\n请用 load_plugin 逐一加载"
+                )
             else:
                 plugins_info = "\n\n（此角色无需额外插件）"
 
         msg = f"✅ 已切换角色: {role_name}"
-        if agent._current_role:
-            msg += f"\n\n身份:\n{agent._current_role}"
+        if role_desc:
+            msg += f"\n\n身份:\n{role_desc}"
         msg += f"\n\n角色记忆: {memory_file.name}"
         if agent._current_role_memory_file:
             msg += "（已切换）"
@@ -139,59 +155,78 @@ def register(agent):
 
         return msg
 
-    agent.add_tool("list_roles", list_roles, {
-        "name": "list_roles",
-        "description": "列出所有可用角色",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "role_plugin"
-    })
-
-    agent.add_tool("get_role_info", get_role_info, {
-        "name": "get_role_info",
-        "description": "查看角色详情（身份、所需插件清单、记忆）",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "role_name": {"type": "string", "description": "角色名"}
-            },
-            "required": ["role_name"]
+    agent.add_tool(
+        "list_roles",
+        list_roles,
+        {
+            "name": "list_roles",
+            "description": "列出所有可用角色",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "role_plugin",
         },
-        "plugin": "role_plugin"
-    })
+    )
 
-    agent.add_tool("create_role", create_role, {
-        "name": "create_role",
-        "description": "创造新角色。定义身份、所需插件清单和初始记忆。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "role_name": {"type": "string", "description": "角色名"},
-                "role_md": {"type": "string", "description": "角色身份描述"},
-                "plugins_json": {"type": "string", "description": "所需插件列表（JSON 数组，如 [\"env_plugin\"]）"},
-                "memory_md": {"type": "string", "description": "初始记忆（可选）"}
+    agent.add_tool(
+        "get_role_info",
+        get_role_info,
+        {
+            "name": "get_role_info",
+            "description": "查看角色详情（身份、所需插件清单、记忆）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role_name": {"type": "string", "description": "角色名"}
+                },
+                "required": ["role_name"],
             },
-            "required": ["role_name", "role_md"]
+            "plugin": "role_plugin",
         },
-        "plugin": "role_plugin"
-    })
+    )
 
-    agent.add_tool("switch_role", switch_role, {
-        "name": "switch_role",
-        "description": "切换角色身份和记忆。插件需自主调用 load_plugin 加载。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "role_name": {"type": "string", "description": "角色名"}
+    agent.add_tool(
+        "create_role",
+        create_role,
+        {
+            "name": "create_role",
+            "description": "创造新角色。定义身份、所需插件清单和初始记忆。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role_name": {"type": "string", "description": "角色名"},
+                    "role_md": {"type": "string", "description": "角色身份描述"},
+                    "plugins_json": {
+                        "type": "string",
+                        "description": '所需插件列表（JSON 数组，如 ["env_plugin"]）',
+                    },
+                    "memory_md": {"type": "string", "description": "初始记忆（可选）"},
+                },
+                "required": ["role_name", "role_md"],
             },
-            "required": ["role_name"]
+            "plugin": "role_plugin",
         },
-        "plugin": "role_plugin"
-    })
+    )
+
+    agent.add_tool(
+        "switch_role",
+        switch_role,
+        {
+            "name": "switch_role",
+            "description": "切换角色身份和记忆。插件需自主调用 load_plugin 加载。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role_name": {"type": "string", "description": "角色名"}
+                },
+                "required": ["role_name"],
+            },
+            "plugin": "role_plugin",
+        },
+    )
 
     return {
         "name": "role_plugin",
         "version": "1.0.0",
         "author": "AgentCore",
         "description": "角色 — 角色 = 身份 + 记忆 + 插件清单",
-        "tools": ["list_roles", "get_role_info", "create_role", "switch_role"]
+        "tools": ["list_roles", "get_role_info", "create_role", "switch_role"],
     }

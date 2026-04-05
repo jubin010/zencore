@@ -1,1 +1,19 @@
-{"active_model":0,"models":[{"name":"本地 Qwen3.5","host":"http://192.168.1.24:11434","model":"qwen3.5:9b","api_key":"ollama","thinking":true}]}
+{
+  "active_model": 0,
+  "models": [
+    {
+      "name": "本地 Qwen3.5",
+      "host": "http://192.168.1.24:11434",
+      "model": "qwen3.5:9b",
+      "api_key": "ollama",
+      "thinking": true
+    },
+    {
+      "name": "MiniMax M2.7",
+      "host": "https://api.minimaxi.com/v1",
+      "model": "MiniMax-M2.7",
+      "api_key": "sk-cp-wx_UElOKRzcYkh2zuTlkJod-VclfSE0RE9AJdPpgxP-_7HQJREEjR4b6WMq-hLcXCJPMXoKdZhcqg-8G50R-V2iIoTivLoR1QgCAmh9W2Vg1nqsrO7d0OO0",
+      "thinking": false
+    }
+  ]
+}

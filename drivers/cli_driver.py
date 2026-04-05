@@ -7,6 +7,7 @@ CLI外壳驱动 - 命令行界面（Rich 美化版）
 支持思考模式（thinking）：使用 response.message.thinking 字段
 """
 
+import json
 import re
 import sys
 from rich.console import Console
@@ -104,14 +105,21 @@ class CLIDriver(DriverInterface):
     def set_title(self, title: str) -> None:
         pass
 
-    def call_llm(self, messages: list) -> str:
-        """调用 LLM — 根据 api_key 自动选择 SDK"""
+    def call_llm(self, messages: list, tools: list = None) -> dict:
+        """调用 LLM — 根据 api_key 自动选择 SDK
+
+        Returns:
+            {
+                "content": str,
+                "tool_calls": list,  # 原生 tool_calls（OpenAI 格式）
+                "thinking": str,
+            }
+        """
         try:
             client = self._get_client()
 
             if not self.api_key or self.api_key.lower() == "ollama":
                 # Ollama SDK 要求 arguments 是 dict 而非 JSON 字符串
-                # 需要将 OpenAI 格式转换为 Ollama 格式
                 ollama_messages = []
                 for msg in messages:
                     if msg.get("role") == "assistant" and "tool_calls" in msg:
@@ -119,7 +127,6 @@ class CLIDriver(DriverInterface):
                         for tc in msg["tool_calls"]:
                             fn = tc.get("function", {})
                             args = fn.get("arguments", "{}")
-                            # 字符串 → dict
                             if isinstance(args, str):
                                 try:
                                     args = json.loads(args)
@@ -164,6 +171,28 @@ class CLIDriver(DriverInterface):
                 )
                 answer = _sanitize(response.message.content)
 
+                # 转换 Ollama tool_calls 为 OpenAI 格式
+                native_tool_calls = []
+                if (
+                    hasattr(response.message, "tool_calls")
+                    and response.message.tool_calls
+                ):
+                    for tc in response.message.tool_calls:
+                        native_tool_calls.append(
+                            {
+                                "id": getattr(tc, "id", f"ollama_tc_{id(tc)}"),
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": json.dumps(
+                                        tc.function.arguments, ensure_ascii=False
+                                    )
+                                    if isinstance(tc.function.arguments, dict)
+                                    else tc.function.arguments,
+                                },
+                            }
+                        )
+
                 if self.thinking and thinking:
                     console.print(
                         Panel(
@@ -171,9 +200,12 @@ class CLIDriver(DriverInterface):
                         )
                     )
                     console.print(Rule(style="dim"))
-                    return answer
 
-                return answer
+                return {
+                    "content": answer,
+                    "tool_calls": native_tool_calls,
+                    "thinking": thinking,
+                }
 
             else:
                 extra_body = {}
@@ -183,39 +215,59 @@ class CLIDriver(DriverInterface):
                     else:
                         extra_body["thinking"] = True
 
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.7,
-                    extra_body=extra_body,
-                )
+                api_kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "extra_body": extra_body,
+                }
+                if tools:
+                    api_kwargs["tools"] = tools
+
+                response = client.chat.completions.create(**api_kwargs)
 
                 message = response.choices[0].message
 
+                thinking = ""
                 if self.thinking and self.thinking_mode == "reasoning_split":
                     thinking = _sanitize(self._extract_thinking_from_openai(message))
-                    if thinking:
-                        console.print(
-                            Panel(
-                                Markdown(thinking),
-                                title="💭 思考过程",
-                                border_style="blue",
-                            )
-                        )
-                        console.print(Rule(style="dim"))
-                    return _sanitize(message.content)
-
-                if self.thinking and hasattr(message, "thinking") and message.thinking:
+                elif (
+                    self.thinking and hasattr(message, "thinking") and message.thinking
+                ):
                     thinking = _sanitize(message.thinking)
+
+                if self.thinking and thinking:
                     console.print(
                         Panel(
                             Markdown(thinking), title="💭 思考过程", border_style="blue"
                         )
                     )
                     console.print(Rule(style="dim"))
-                    return _sanitize(message.content)
 
-                return _sanitize(message.content)
+                # 提取原生 tool_calls
+                native_tool_calls = []
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    for tc in message.tool_calls:
+                        native_tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                        )
+
+                return {
+                    "content": _sanitize(message.content),
+                    "tool_calls": native_tool_calls,
+                    "thinking": thinking,
+                }
 
         except Exception as e:
-            return f"❌ LLM调用失败: {str(e)}"
+            return {
+                "content": f"❌ LLM调用失败: {str(e)}",
+                "tool_calls": [],
+                "thinking": "",
+            }

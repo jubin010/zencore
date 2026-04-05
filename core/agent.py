@@ -40,7 +40,17 @@ class DriverInterface:
     def get_input(self, prompt: str = "") -> str:
         raise NotImplementedError
 
-    def call_llm(self, messages: list) -> str:
+    def call_llm(self, messages: list, tools: list = None) -> dict:
+        """
+        调用 LLM，返回结构化响应
+
+        Returns:
+            {
+                "content": str,          # 文本内容
+                "tool_calls": list,      # 原生 tool_calls（可选）
+                "thinking": str,         # 思考内容（可选）
+            }
+        """
         raise NotImplementedError
 
 
@@ -415,122 +425,105 @@ class AgentCore:
         self.add_message("assistant", response)
         return response
 
+    def _build_tools_schema(self) -> list:
+        """构建 OpenAI 兼容的 tools schema"""
+        tools = self.tool_registry.list_all()
+        if not tools:
+            return []
+        result = []
+        for name, info in tools.items():
+            result.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": info.get("description", ""),
+                        "parameters": info.get(
+                            "parameters",
+                            {"type": "object", "properties": {}, "required": []},
+                        ),
+                    },
+                }
+            )
+        return result
+
     def chat_with_tools(self, message: str) -> str:
         self.add_message("user", message)
         self._consecutive_failures = 0
         total_failures = 0
-        MAX_TOTAL_FAILURES = 50  # 安全熔断：给 AI 充足的尝试机会
+        MAX_TOTAL_FAILURES = 50
 
-        # 无限循环：由本能驱动，直到完成任务或用户打断
+        tools_schema = self._build_tools_schema()
+
         while True:
-            # 检查打断信号
             if getattr(self, "_stop_flag", False):
                 self._stop_flag = False
                 return "🛑 思考被用户打断。"
 
-            # 安全熔断
             if total_failures >= MAX_TOTAL_FAILURES:
                 return f"❌ 已达到最大尝试次数 ({MAX_TOTAL_FAILURES})。我可能陷入了死循环，请人类协助。"
 
-            llm_response = self._call_llm(self._build_prompt(""))
-            tool_call = self._extract_tool_call(llm_response)
+            # 构建完整消息
+            sys_prompt = json.loads(self._build_prompt(""))[0]["content"]
+            messages = [
+                {"role": "system", "content": sys_prompt},
+                *self.conversation_history,
+            ]
 
-            if tool_call is None:
-                self.add_message("assistant", llm_response)
-                return llm_response
-
-            tool_name = tool_call.get("tool")
-            tool_params = tool_call.get("params", {})
-            tool_id = str(uuid.uuid4())  # 生成 tool_call_id 供 MiniMax 等 API 使用
-
-            # 以 OpenAI 兼容格式存储 assistant 消息（含 tool_calls）
-            self.add_message(
-                "assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": tool_id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "arguments": json.dumps(tool_params, ensure_ascii=False),
-                        },
-                    }
-                ],
+            # 调用 LLM（传入 tools schema 获取原生 tool_calls）
+            result = self.driver.call_llm(
+                messages, tools=tools_schema if tools_schema else None
             )
+            content = self._sanitize_text(result.get("content", ""))
+            tool_calls = result.get("tool_calls", [])
 
-            tool_result = self.execute_tool(tool_name, **tool_params)
+            # 无工具调用 → 直接返回
+            if not tool_calls:
+                self.add_message("assistant", content)
+                return content
 
-            # 更新失败计数（供本能插件读取）
-            if tool_result.startswith("❌ [ERROR]"):
-                self._consecutive_failures += 1
-                total_failures += 1
-            else:
-                self._consecutive_failures = 0
+            # 有工具调用 → 存储 assistant 消息（使用原生 tool_calls）
+            self.add_message("assistant", content="", tool_calls=tool_calls)
 
-            # 以 OpenAI 兼容格式存储 tool 消息（含 tool_call_id 匹配）
-            self.add_message("tool", content=tool_result, tool_call_id=tool_id)
+            # 执行每个工具调用
+            for tc in tool_calls:
+                tool_id = tc.get("id", str(uuid.uuid4()))
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                args_str = fn.get("arguments", "{}")
+                try:
+                    tool_params = (
+                        json.loads(args_str) if isinstance(args_str, str) else args_str
+                    )
+                except:
+                    tool_params = {}
 
-            tool_result = self.execute_tool(tool_name, **tool_params)
+                tool_result = self.execute_tool(tool_name, **tool_params)
 
-            # 更新失败计数（供本能插件读取）
-            if tool_result.startswith("❌ [ERROR]"):
-                self._consecutive_failures += 1
-                total_failures += 1
-            else:
-                self._consecutive_failures = 0
+                if tool_result.startswith("❌ [ERROR]"):
+                    self._consecutive_failures += 1
+                    total_failures += 1
+                else:
+                    self._consecutive_failures = 0
 
-            # 以 OpenAI 兼容格式存储 tool 消息（含 tool_call_id 匹配）
-            self.conversation_history.append(
-                {"role": "tool", "tool_call_id": tool_id, "content": tool_result}
-            )
+                self.add_message("tool", content=tool_result, tool_call_id=tool_id)
 
     def _sanitize_text(self, text: str) -> str:
         """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""
         import re
 
-        # 移除 U+D800 到 U+DFFF 之间的字符
         return re.sub(r"[\ud800-\udfff]", "", text)
 
     def _call_llm(self, prompt: str) -> str:
         if self.driver and hasattr(self.driver, "call_llm"):
             try:
                 messages = json.loads(prompt)
-                response = self.driver.call_llm(messages)
-                return self._sanitize_text(response)
+                result = self.driver.call_llm(messages)
+                return self._sanitize_text(result.get("content", ""))
             except Exception as e:
                 return f"❌ LLM调用失败: {str(e)}\n{traceback.format_exc()}"
         else:
             return "❌ 外壳驱动未实现 call_llm 方法"
-
-    def _extract_tool_call(self, response: str) -> Optional[Dict]:
-        try:
-            # 查找第一个 { 的位置
-            start = response.find("{")
-            if start == -1:
-                return None
-
-            # 匹配嵌套的 JSON 对象（处理嵌套的花括号）
-            depth = 0
-            end = start
-            for i in range(start, len(response)):
-                if response[i] == "{":
-                    depth += 1
-                elif response[i] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-
-            json_str = response[start:end]
-            data = json.loads(json_str)
-
-            # 验证是否包含 tool 字段
-            if "tool" in data:
-                return data
-            return None
-        except:
-            return None
 
     def send(self, content: str):
         if self.driver:
