@@ -104,10 +104,10 @@ def register(agent):
         return "\n".join(lines)
 
     def get_plugin_template(plugin_name: str = "my_plugin") -> str:
-        """获取插件开发模板"""
+        """获取插件开发模板 — 遵循渐进式披露规范"""
         return f'''# __init__.py
 """
-{plugin_name} - 插件描述
+{plugin_name} - 一句话描述插件功能
 """
 
 from pathlib import Path
@@ -122,9 +122,12 @@ def register(agent):
         """我的工具函数"""
         return f"结果: {{param}}"
     
+    # 渐进式披露规范：
+    # description 必须极简（4-16 字符），只说明"做什么"
+    # 详细用法、示例、注意事项写在 plugin.md 中
     agent.add_tool("my_tool", my_tool, {{
         "name": "my_tool",
-        "description": "工具描述",
+        "description": "工具做什么",
         "parameters": {{
             "type": "object",
             "properties": {{
@@ -142,7 +145,7 @@ def register(agent):
         "name": "{plugin_name}",
         "version": "1.0.0",
         "author": "作者名",
-        "description": "插件描述",
+        "description": "一句话描述插件",
         "tools": ["my_tool"]
     }}
 
@@ -151,23 +154,23 @@ def register(agent):
 
 
 # plugin.md
+
 # {plugin_name}
 
-## 描述
-简要描述这个插件做什么
-
-## 触发词
-关键词1、关键词2、关键词3
+一句话描述插件功能
 
 ## 工具
-| 工具名 | 参数 | 描述 |
-|--------|------|------|
-| my_tool | param: str | 工具描述 |
+
+### my_tool
+工具做什么。
+- `param`（必填）：参数描述
+- 返回：返回值说明
 
 ## 使用示例
-```
+
+\`\`\`
 my_tool(param="test") → "结果: test"
-```
+\`\`\`
 
 ## 注意事项
 - 注意事项1
