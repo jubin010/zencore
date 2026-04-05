@@ -1,49 +1,6 @@
 {
     "active_model": 0,
     "models": [
-        {
-            "name": "本地 Qwen3.5",
-            "host": "http://192.168.1.24:11434",
-            "model": "qwen3.5:9b",
-            "api_key": "ollama",
-            "thinking": true
-        },
-        {
-            "name": "MiniMax M2.7",
-            "host": "https://api.minimaxi.com/v1",
-            "model": "MiniMax-M2.7",
-            "api_key": "YOUR_MINIMAX_API_KEY",
-            "thinking": true,
-            "thinking_mode": "reasoning_split"
-        },
-        {
-            "name": "MiniMax M2.7 极速版",
-            "host": "https://api.minimaxi.com/v1",
-            "model": "MiniMax-M2.7-highspeed",
-            "api_key": "YOUR_MINIMAX_API_KEY",
-            "thinking": true,
-            "thinking_mode": "reasoning_split"
-        },
-        {
-            "name": "通义千问 Turbo",
-            "host": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "model": "qwen-turbo",
-            "api_key": "YOUR_DASHSCOPE_API_KEY",
-            "thinking": false
-        },
-        {
-            "name": "DeepSeek V3",
-            "host": "https://api.deepseek.com/v1",
-            "model": "deepseek-chat",
-            "api_key": "YOUR_DEEPSEEK_API_KEY",
-            "thinking": false
-        },
-        {
-            "name": "OpenAI GPT-4o",
-            "host": "https://api.openai.com/v1",
-            "model": "gpt-4o",
-            "api_key": "YOUR_OPENAI_API_KEY",
-            "thinking": false
-        }
+        {"name": "本地 Qwen3.5", "host": "http://192.168.1.24:11434", "model": "qwen3.5:9b", "api_key": "ollama", "thinking": true}
     ]
 }

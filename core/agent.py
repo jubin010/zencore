@@ -7,6 +7,7 @@ Genesis 版本：一切从简，让 AI 自主演化
 import sys
 import json
 import re
+import uuid
 import traceback
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
@@ -431,6 +432,28 @@ class AgentCore:
 
             tool_name = tool_call.get("tool")
             tool_params = tool_call.get("params", {})
+            tool_id = str(uuid.uuid4())  # 生成 tool_call_id 供 MiniMax 等 API 使用
+
+            # 以 OpenAI 兼容格式存储 assistant 消息（含 tool_calls）
+            self.conversation_history.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": json.dumps(
+                                    tool_params, ensure_ascii=False
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
             tool_result = self.execute_tool(tool_name, **tool_params)
 
             # 更新失败计数（供本能插件读取）
@@ -440,12 +463,10 @@ class AgentCore:
             else:
                 self._consecutive_failures = 0
 
-            tool_message = json.dumps(
-                {"tool": tool_name, "params": tool_params, "result": tool_result},
-                ensure_ascii=False,
+            # 以 OpenAI 兼容格式存储 tool 消息（含 tool_call_id 匹配）
+            self.conversation_history.append(
+                {"role": "tool", "tool_call_id": tool_id, "content": tool_result}
             )
-            self.add_message("assistant", f"[工具调用]\n{tool_message}")
-            self.add_message("tool", tool_result)
 
     def _sanitize_text(self, text: str) -> str:
         """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""
