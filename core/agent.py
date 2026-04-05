@@ -322,7 +322,6 @@ class AgentCore:
         return "\n\n".join(lines) if lines else "（暂无教训，保持警惕）"
 
     def _build_prompt(self, user_message: str) -> str:
-        tools_desc = self._get_tools_description()
         plugins_info = self._get_plugins_info()
         lessons = self._load_lessons(self._current_role)
         instincts = self.instinct_registry.evaluate()
@@ -335,10 +334,6 @@ class AgentCore:
 ## 你的身份
 
 一切皆为插件。你的所有能力都来自插件，你也可以创造新的插件。
-
-## 当前已加载的工具
-
-{tools_desc}
 
 ## 插件索引
 
@@ -367,15 +362,21 @@ class AgentCore:
 - **角色 = 解药**：查阅 `plugins/roles/` 下的角色说明，找到能缓解该本能的角色。
 - **行动**：切换到对应角色，利用其工具消除不适。
 
-## 响应格式
+## 工具使用
 
-当需要执行工具时，返回JSON格式:
-{{"tool": "工具名", "params": {{"参数名": "参数值"}}}}
+你已拥有 OpenAI 兼容的原生工具调用能力。工具的参数结构由系统自动提供。
 
-## 工具说明书
+### 渐进式披露：plugin.md
 
 每个工具的详细说明存放在 `plugins/{{插件名}}/plugin.md` 中。
-如果不确定参数或用法，用 `read_file` 读取对应说明书学习。
+这些说明书包含：用法示例、边界情况、注意事项、与其他工具的配合方式。
+
+**不要一次性读完所有说明书。** 只在以下情况读取：
+- 不确定某个工具的参数用法时
+- 工具报错需要排查时
+- 需要了解高级用法或组合用法时
+
+用 `read_file` 读取对应说明书。
 例如: `read_file(path="plugins/env_plugin/plugin.md")`
 
 ## 错误记录规则
@@ -398,16 +399,6 @@ class AgentCore:
             {"role": "user", "content": user_message},
         ]
         return json.dumps(messages, ensure_ascii=False)
-
-    def _get_tools_description(self) -> str:
-        tools = self.tool_registry.list_all()
-        if not tools:
-            return "(暂无已加载工具)"
-        lines = []
-        for name, info in tools.items():
-            desc = info.get("description", "无描述")
-            lines.append(f"- {name}: {desc}")
-        return "\n".join(lines)
 
     def _get_plugins_info(self) -> str:
         if PLUGINS_MD.exists():
