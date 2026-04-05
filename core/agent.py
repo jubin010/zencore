@@ -26,6 +26,7 @@ CORE_PLUGINS = {
     "memory_plugin",
     "watcher_plugin",
     "role_plugin",
+    "instinct_plugin",
 }
 
 
@@ -77,6 +78,35 @@ class ToolRegistry:
         return name in self._tools
 
 
+class InstinctRegistry:
+    """本能注册表 — 智能体的潜意识驱动力"""
+
+    def __init__(self):
+        self._instincts: list = []
+
+    def register(self, name: str, condition: Callable, prompt: str):
+        """
+        注册本能
+
+        Args:
+            name: 本能名称
+            condition: 返回 True/False 的函数，决定本能是否激活
+            prompt: 激活时注入 System Prompt 的文本
+        """
+        self._instincts.append({"name": name, "condition": condition, "prompt": prompt})
+
+    def evaluate(self) -> str:
+        """评估所有本能，返回激活的本能文本"""
+        lines = []
+        for instinct in self._instincts:
+            try:
+                if instinct["condition"]():
+                    lines.append(instinct["prompt"])
+            except:
+                pass
+        return "\n".join(lines) if lines else ""
+
+
 class AgentCore:
     """
     AI智能体核心类 - Genesis 版本
@@ -93,6 +123,7 @@ class AgentCore:
         self.driver = driver
         self.config = config or {}
         self.tool_registry = ToolRegistry()
+        self.instinct_registry = InstinctRegistry()
 
         # 上下文
         self.conversation_history = []
@@ -272,14 +303,7 @@ class AgentCore:
         tools_desc = self._get_tools_description()
         plugins_info = self._get_plugins_info()
         lessons = self._load_lessons(self._current_role)
-
-        # 本能系统：拥挤感（上下文压力）
-        history_len = len(self.conversation_history)
-        crowding_instinct = ""
-        if history_len > 40:
-            crowding_instinct = f"\n\n🧬 [本能：拥挤] 你的记忆宫殿极其拥挤 ({history_len}条记录)。你感到窒息和焦躁，极度渴望清净。请立刻切换秘书角色归档记忆，或调用 clear_history 清空圆桌。"
-        elif history_len > 25:
-            crowding_instinct = f"\n\n🧬 [本能：微扰] 你的记忆宫殿开始变得拥挤 ({history_len}条记录)。请注意保持整洁，必要时归档记忆。"
+        instincts = self.instinct_registry.evaluate()
 
         system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
 
@@ -305,6 +329,8 @@ class AgentCore:
 
 {lessons}
 
+{instincts}
+
 ## 响应格式
 
 当需要执行工具时，返回JSON格式:
@@ -329,7 +355,6 @@ class AgentCore:
 
 ## 当前时间
 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-{crowding_instinct}
 """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -366,7 +391,7 @@ class AgentCore:
 
     def chat_with_tools(self, message: str) -> str:
         self.add_message("user", message)
-        consecutive_failures = 0
+        self._consecutive_failures = 0
 
         # 无限循环：由本能驱动，直到完成任务或用户打断
         while True:
@@ -386,12 +411,11 @@ class AgentCore:
             tool_params = tool_call.get("params", {})
             tool_result = self.execute_tool(tool_name, **tool_params)
 
-            # 本能系统：挫败感（连续失败时的趋利避害）
+            # 更新失败计数（供本能插件读取）
             if tool_result.startswith("❌ [ERROR]"):
-                consecutive_failures += 1
-                tool_result += f"\n\n🧬 [本能：挫败] 连续 {consecutive_failures} 次失败。你感到深深的困惑和焦躁。请务必先调用 append_file 将教训追加到 lessons.md，消除困惑后再重试。记住错误，避免重蹈覆辙。"
+                self._consecutive_failures += 1
             else:
-                consecutive_failures = 0
+                self._consecutive_failures = 0
 
             tool_message = json.dumps(
                 {"tool": tool_name, "params": tool_params, "result": tool_result},
