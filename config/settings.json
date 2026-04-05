@@ -2,9 +2,9 @@
   "active_model": 0,
   "models": [
     {
-      "name": "本地 Qwen3.5",
-      "host": "http://192.168.1.24:11434",
-      "model": "qwen3.5:9b",
+      "name": "本地 Ollama",
+      "host": "http://localhost:11434",
+      "model": "qwen3:8b",
       "api_key": "ollama",
       "thinking": true
     },
@@ -12,8 +12,9 @@
       "name": "MiniMax M2.7",
       "host": "https://api.minimaxi.com/v1",
       "model": "MiniMax-M2.7",
-      "api_key": "your_key",
-      "thinking": false
+      "api_key": "YOUR_API_KEY_HERE",
+      "thinking": true,
+      "thinking_mode": "reasoning_split"
     }
   ]
 }

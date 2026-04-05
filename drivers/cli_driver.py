@@ -24,6 +24,41 @@ def _sanitize(text: str) -> str:
     return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
 
 
+def _parse_ollama_thinking_toolcalls(thinking: str) -> list:
+    """从 Ollama thinking 文本中解析 tool_call 标签"""
+    if not thinking:
+        return []
+
+    pattern = r"<tool_call>\s*<function=(\w+)([^>]*)>(?:<parameter=(\w+)>([^<]*)</parameter>)?([^<]*)</tool_call>"
+    matches = re.findall(pattern, thinking)
+
+    tool_calls = []
+    for i, match in enumerate(matches):
+        func_name = match[0]
+        rest = match[1]
+        param_name = match[2]
+        param_value = match[3]
+
+        arguments = {}
+        if param_name and param_value:
+            arguments[param_name] = param_value
+
+        tool_calls.append(
+            {
+                "id": f"ollama_tc_thought_{i}_{id(thinking)}",
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False)
+                    if arguments
+                    else "{}",
+                },
+            }
+        )
+
+    return tool_calls
+
+
 class CLIDriver(DriverInterface):
     """命令行驱动（Rich 美化版）"""
 
@@ -99,6 +134,19 @@ class CLIDriver(DriverInterface):
     def show_loading(self, message: str = "处理中..."):
         console.print(f"[dim]⏳ {message}...[/]")
 
+    def start_thinking(self):
+        from rich.spinner import Spinner
+        from rich.live import Live
+
+        spinner = Spinner("dots", text=f"[dim]{self.name} 正在思考...[/]")
+        self._thinking_live = Live(spinner, console=console, transient=True)
+        self._thinking_live.start()
+
+    def stop_thinking(self):
+        if hasattr(self, "_thinking_live") and self._thinking_live:
+            self._thinking_live.stop()
+            self._thinking_live = None
+
     def toast(self, message: str, duration: int = 3) -> None:
         console.print(Panel(message, title="📢 提示", border_style="yellow"))
 
@@ -166,7 +214,11 @@ class CLIDriver(DriverInterface):
                 if tools:
                     api_kwargs["tools"] = tools
 
-                response = client.chat(**api_kwargs)
+                self.start_thinking()
+                try:
+                    response = client.chat(**api_kwargs)
+                finally:
+                    self.stop_thinking()
 
                 thinking = (
                     _sanitize(response.message.thinking)
@@ -197,10 +249,16 @@ class CLIDriver(DriverInterface):
                             }
                         )
 
+                # Ollama think 模式下 tool_calls 可能藏在 thinking 文本中
+                if not native_tool_calls and self.thinking and thinking:
+                    native_tool_calls = _parse_ollama_thinking_toolcalls(thinking)
+
                 if self.thinking and thinking:
                     console.print(
                         Panel(
-                            Markdown(thinking), title="💭 思考过程", border_style="blue"
+                            Markdown(thinking),
+                            title=f"💭 {self.name} 思考过程",
+                            border_style="blue",
                         )
                     )
                     console.print(Rule(style="dim"))
@@ -213,37 +271,44 @@ class CLIDriver(DriverInterface):
 
             else:
                 extra_body = {}
-                if self.thinking:
-                    if self.thinking_mode == "reasoning_split":
-                        extra_body["reasoning_split"] = True
-                    else:
-                        extra_body["thinking"] = True
+                if self.thinking_mode == "reasoning_split":
+                    extra_body["reasoning_split"] = True
+                elif self.thinking_mode and self.thinking_mode.startswith(
+                    "extra_body:"
+                ):
+                    key, val = self.thinking_mode[len("extra_body:") :].split("=", 1)
+                    extra_body[key.strip()] = val.strip().lower() == "true"
 
                 api_kwargs = {
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.7,
-                    "extra_body": extra_body,
                 }
+                if extra_body:
+                    api_kwargs["extra_body"] = extra_body
                 if tools:
                     api_kwargs["tools"] = tools
 
-                response = client.chat.completions.create(**api_kwargs)
+                self.start_thinking()
+                try:
+                    response = client.chat.completions.create(**api_kwargs)
+                finally:
+                    self.stop_thinking()
 
                 message = response.choices[0].message
 
                 thinking = ""
-                if self.thinking and self.thinking_mode == "reasoning_split":
+                if self.thinking_mode == "reasoning_split":
                     thinking = _sanitize(self._extract_thinking_from_openai(message))
-                elif (
-                    self.thinking and hasattr(message, "thinking") and message.thinking
-                ):
+                elif hasattr(message, "thinking") and message.thinking:
                     thinking = _sanitize(message.thinking)
 
-                if self.thinking and thinking:
+                if thinking:
                     console.print(
                         Panel(
-                            Markdown(thinking), title="💭 思考过程", border_style="blue"
+                            Markdown(thinking),
+                            title=f"💭 {self.name} 思考过程",
+                            border_style="blue",
                         )
                     )
                     console.print(Rule(style="dim"))

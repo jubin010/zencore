@@ -470,6 +470,11 @@ class AgentCore:
 
             # 无工具调用 → 直接返回
             if not tool_calls:
+                # Ollama thinking 模式有时把回复放到 thinking 字段
+                if not content:
+                    thinking = result.get("thinking", "")
+                    if thinking:
+                        content = self._sanitize_text(thinking)
                 self.add_message("assistant", content)
                 return content
 
