@@ -12,7 +12,7 @@
       "name": "MiniMax M2.7",
       "host": "https://api.minimaxi.com/v1",
       "model": "MiniMax-M2.7",
-      "api_key": "sk-cp-wx_UElOKRzcYkh2zuTlkJod-VclfSE0RE9AJdPpgxP-_7HQJREEjR4b6WMq-hLcXCJPMXoKdZhcqg-8G50R-V2iIoTivLoR1QgCAmh9W2Vg1nqsrO7d0OO0",
+      "api_key": "your_key",
       "thinking": false
     }
   ]
