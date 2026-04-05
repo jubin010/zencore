@@ -143,32 +143,40 @@ def register(agent):
     def update_wrapper(force=False):
         return update_plugins_md(agent=agent, force=force)
 
-    agent.add_tool("update_plugins_md", update_wrapper, {
-        "name": "update_plugins_md",
-        "description": "更新 plugins.md 注册表。智能体添加新插件后自动调用，或人类开发者添加插件后自动生效。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "force": {
-                    "type": "boolean",
-                    "description": "是否强制更新（忽略内容对比）"
-                }
-            }
+    agent.add_tool(
+        "update_plugins_md",
+        update_wrapper,
+        {
+            "name": "update_plugins_md",
+            "description": "更新插件注册表",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "force": {
+                        "type": "boolean",
+                        "description": "是否强制更新（忽略内容对比）",
+                    }
+                },
+            },
+            "plugin": "watcher_plugin",
         },
-        "plugin": "watcher_plugin"
-    })
+    )
 
-    agent.add_tool("scan_plugins", scan_plugins, {
-        "name": "scan_plugins",
-        "description": "扫描 plugins/ 目录，报告当前状态（目录模式）",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "watcher_plugin"
-    })
+    agent.add_tool(
+        "scan_plugins",
+        scan_plugins,
+        {
+            "name": "scan_plugins",
+            "description": "扫描插件目录",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "watcher_plugin",
+        },
+    )
 
     return {
         "name": "watcher_plugin",
         "version": "2.0.0",
         "author": "AgentCore",
         "description": "插件目录监听 - 自动更新插件注册表",
-        "tools": ["update_plugins_md", "scan_plugins"]
+        "tools": ["update_plugins_md", "scan_plugins"],
     }

@@ -171,7 +171,7 @@ def register(agent):
         get_role_info,
         {
             "name": "get_role_info",
-            "description": "查看角色详情（身份、所需插件清单、记忆）",
+            "description": "查看角色详情",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -188,7 +188,7 @@ def register(agent):
         create_role,
         {
             "name": "create_role",
-            "description": "创造新角色。定义身份、所需插件清单和初始记忆。",
+            "description": "创造新角色",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -196,7 +196,7 @@ def register(agent):
                     "role_md": {"type": "string", "description": "角色身份描述"},
                     "plugins_json": {
                         "type": "string",
-                        "description": '所需插件列表（JSON 数组，如 ["env_plugin"]）',
+                        "description": "所需插件列表（JSON 数组）",
                     },
                     "memory_md": {"type": "string", "description": "初始记忆（可选）"},
                 },
@@ -211,7 +211,7 @@ def register(agent):
         switch_role,
         {
             "name": "switch_role",
-            "description": "切换角色身份和记忆。插件需自主调用 load_plugin 加载。",
+            "description": "切换角色",
             "parameters": {
                 "type": "object",
                 "properties": {

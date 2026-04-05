@@ -97,7 +97,7 @@ def register(agent):
         for pname, tnames in sorted(plugin_tools.items()):
             tools_str = ", ".join([f"`{t}`" for t in tnames[:5]])
             if len(tnames) > 5:
-                tools_str += f" ... (+{len(tnames)-5})"
+                tools_str += f" ... (+{len(tnames) - 5})"
             lines.append(f"\n### `{pname}`")
             lines.append(f"工具: {tools_str}")
 
@@ -199,29 +199,25 @@ my_tool(param="test") → "结果: test"
         """获取所有可用工具"""
         tools = agent.tool_registry.list_all()
 
-        lines = [
-            "🔧 可用工具列表",
-            "=" * 50,
-            "",
-            f"**已加载: {len(tools)} 个**",
-            ""
-        ]
+        lines = ["🔧 可用工具列表", "=" * 50, "", f"**已加载: {len(tools)} 个**", ""]
 
         for tool in sorted(tools.keys()):
             desc = tools[tool].get("description", "")
             lines.append(f"  - `{tool}`: {desc}")
 
-        lines.extend([
-            "",
-            "💡 提示: 需要更多工具？AI可以自己编写！",
-            "",
-            "示例:",
-            '```python',
-            'code = get_plugin_template("my_tool")',
-            '# 修改 code',
-            'write_plugin("my_tool", code)',
-            '```'
-        ])
+        lines.extend(
+            [
+                "",
+                "💡 提示: 需要更多工具？AI可以自己编写！",
+                "",
+                "示例:",
+                "```python",
+                'code = get_plugin_template("my_tool")',
+                "# 修改 code",
+                'write_plugin("my_tool", code)',
+                "```",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -245,6 +241,7 @@ my_tool(param="test") → "结果: test"
                 return f"❌ 插件目录 {plugin_name}/ 不存在"
 
             import shutil
+
             shutil.rmtree(plugin_dir)
 
             try:
@@ -259,125 +256,172 @@ my_tool(param="test") → "结果: test"
             return f"❌ 删除失败: {str(e)}"
 
     # 注册所有工具
-    agent.add_tool("write_plugin", write_plugin, {
-        "name": "write_plugin",
-        "description": "编写新插件（目录模式）。创建插件目录、__init__.py 和可选 plugin.md，写入后自动加载并更新注册表。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名（如: weather_plugin）"},
-                "code": {"type": "string", "description": "插件代码（__init__.py 内容）"},
-                "plugin_md": {"type": "string", "description": "可选的 plugin.md 内容（工具说明文档）"}
+    agent.add_tool(
+        "write_plugin",
+        write_plugin,
+        {
+            "name": "write_plugin",
+            "description": "编写新插件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"},
+                    "code": {"type": "string", "description": "插件代码"},
+                    "plugin_md": {
+                        "type": "string",
+                        "description": "可选的 plugin.md 内容",
+                    },
+                },
+                "required": ["plugin_name", "code"],
             },
-            "required": ["plugin_name", "code"]
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("load_plugin", load_plugin, {
-        "name": "load_plugin",
-        "description": "加载指定插件目录",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名"}
+    agent.add_tool(
+        "load_plugin",
+        load_plugin,
+        {
+            "name": "load_plugin",
+            "description": "加载指定插件目录",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"}
+                },
+                "required": ["plugin_name"],
             },
-            "required": ["plugin_name"]
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("unload_plugin", unload_plugin, {
-        "name": "unload_plugin",
-        "description": "卸载指定插件的所有工具。核心插件不可卸载。用于释放不需要的工具，保持注册表精简。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名"}
+    agent.add_tool(
+        "unload_plugin",
+        unload_plugin,
+        {
+            "name": "unload_plugin",
+            "description": "卸载插件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"}
+                },
+                "required": ["plugin_name"],
             },
-            "required": ["plugin_name"]
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("reload_plugins", reload_plugins, {
-        "name": "reload_plugins",
-        "description": "重新加载所有插件目录",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "plugin_builder"
-    })
-
-    agent.add_tool("list_plugins", list_plugins, {
-        "name": "list_plugins",
-        "description": "列出所有已加载的插件及其工具",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "plugin_builder"
-    })
-
-    agent.add_tool("get_plugin_template", get_plugin_template, {
-        "name": "get_plugin_template",
-        "description": "获取插件开发模板代码（目录模式）",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名"}
-            }
+    agent.add_tool(
+        "reload_plugins",
+        reload_plugins,
+        {
+            "name": "reload_plugins",
+            "description": "重新加载所有插件目录",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("get_plugin_info", get_plugin_info, {
-        "name": "get_plugin_info",
-        "description": "读取指定插件的 plugin.md 详情。在 load_plugin 之前调用，了解工具参数、使用示例和注意事项。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名"}
+    agent.add_tool(
+        "list_plugins",
+        list_plugins,
+        {
+            "name": "list_plugins",
+            "description": "列出所有已加载的插件及其工具",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "plugin_builder",
+        },
+    )
+
+    agent.add_tool(
+        "get_plugin_template",
+        get_plugin_template,
+        {
+            "name": "get_plugin_template",
+            "description": "获取插件开发模板代码（目录模式）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"}
+                },
             },
-            "required": ["plugin_name"]
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("get_plugin_readme", get_plugin_readme, {
-        "name": "get_plugin_readme",
-        "description": "读取插件编写指南",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "plugin_builder"
-    })
-
-    agent.add_tool("get_available_tools", get_available_tools, {
-        "name": "get_available_tools",
-        "description": "获取所有可用工具列表",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "plugin_builder"
-    })
-
-    agent.add_tool("validate_code", validate_code, {
-        "name": "validate_code",
-        "description": "验证Python代码语法是否正确",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "待验证的代码"}
+    agent.add_tool(
+        "get_plugin_info",
+        get_plugin_info,
+        {
+            "name": "get_plugin_info",
+            "description": "读取插件说明书",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"}
+                },
+                "required": ["plugin_name"],
             },
-            "required": ["code"]
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
 
-    agent.add_tool("delete_plugin", delete_plugin, {
-        "name": "delete_plugin",
-        "description": "删除指定插件目录",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "插件目录名"}
-            },
-            "required": ["plugin_name"]
+    agent.add_tool(
+        "get_plugin_readme",
+        get_plugin_readme,
+        {
+            "name": "get_plugin_readme",
+            "description": "读取插件编写指南",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "plugin_builder",
         },
-        "plugin": "plugin_builder"
-    })
+    )
+
+    agent.add_tool(
+        "get_available_tools",
+        get_available_tools,
+        {
+            "name": "get_available_tools",
+            "description": "获取所有可用工具列表",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "plugin_builder",
+        },
+    )
+
+    agent.add_tool(
+        "validate_code",
+        validate_code,
+        {
+            "name": "validate_code",
+            "description": "验证Python代码语法是否正确",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "待验证的代码"}
+                },
+                "required": ["code"],
+            },
+            "plugin": "plugin_builder",
+        },
+    )
+
+    agent.add_tool(
+        "delete_plugin",
+        delete_plugin,
+        {
+            "name": "delete_plugin",
+            "description": "删除指定插件目录",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件目录名"}
+                },
+                "required": ["plugin_name"],
+            },
+            "plugin": "plugin_builder",
+        },
+    )
 
     return {
         "name": "plugin_builder",
@@ -385,9 +429,16 @@ my_tool(param="test") → "结果: test"
         "author": "AgentCore",
         "description": "插件构建器 - 让AI和人类都能编写插件（目录模式）",
         "tools": [
-            "write_plugin", "load_plugin", "unload_plugin",
-            "reload_plugins", "list_plugins", "get_plugin_template",
-            "get_plugin_info", "get_plugin_readme",
-            "get_available_tools", "validate_code", "delete_plugin"
-        ]
+            "write_plugin",
+            "load_plugin",
+            "unload_plugin",
+            "reload_plugins",
+            "list_plugins",
+            "get_plugin_template",
+            "get_plugin_info",
+            "get_plugin_readme",
+            "get_available_tools",
+            "validate_code",
+            "delete_plugin",
+        ],
     }

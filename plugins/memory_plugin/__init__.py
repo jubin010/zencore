@@ -30,43 +30,58 @@ def register(agent):
             f.write(line + "\n")
         return "✅ 已追加到全局记忆"
 
-    agent.add_tool("read_global_memory", read_global_memory, {
-        "name": "read_global_memory",
-        "description": "读取全局记忆（本体记忆）。所有角色共享的长期认知。",
-        "parameters": {"type": "object", "properties": {}},
-        "plugin": "memory_plugin"
-    })
-
-    agent.add_tool("write_global_memory", write_global_memory, {
-        "name": "write_global_memory",
-        "description": "覆盖写入全局记忆。用于更新用户画像、项目全局配置等。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "完整的全局记忆内容（Markdown）"}
-            },
-            "required": ["content"]
+    agent.add_tool(
+        "read_global_memory",
+        read_global_memory,
+        {
+            "name": "read_global_memory",
+            "description": "读取全局记忆",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "memory_plugin",
         },
-        "plugin": "memory_plugin"
-    })
+    )
 
-    agent.add_tool("append_global_memory", append_global_memory, {
-        "name": "append_global_memory",
-        "description": "追加一行到全局记忆。用于记录跨角色的长期经验。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "line": {"type": "string", "description": "要追加的内容"}
+    agent.add_tool(
+        "write_global_memory",
+        write_global_memory,
+        {
+            "name": "write_global_memory",
+            "description": "覆盖写入全局记忆",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "完整的全局记忆内容（Markdown）",
+                    }
+                },
+                "required": ["content"],
             },
-            "required": ["line"]
+            "plugin": "memory_plugin",
         },
-        "plugin": "memory_plugin"
-    })
+    )
+
+    agent.add_tool(
+        "append_global_memory",
+        append_global_memory,
+        {
+            "name": "append_global_memory",
+            "description": "追加一行到全局记忆",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line": {"type": "string", "description": "要追加的内容"}
+                },
+                "required": ["line"],
+            },
+            "plugin": "memory_plugin",
+        },
+    )
 
     return {
         "name": "memory_plugin",
         "version": "2.0.0",
         "author": "AgentCore",
         "description": "本体记忆 — 全局、跨角色、长期有效",
-        "tools": ["read_global_memory", "write_global_memory", "append_global_memory"]
+        "tools": ["read_global_memory", "write_global_memory", "append_global_memory"],
     }
