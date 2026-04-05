@@ -1,16 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 zencore 主入口
-支持多种运行模式: CLI / Genesis
+支持多种运行模式: WWG / Genesis
 """
 
 import sys
+import time
 from pathlib import Path
 
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
 
 from core.agent import AgentCore
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+
+console = Console()
 
 
 def load_config():
@@ -24,7 +30,6 @@ def load_config():
 
 
 def get_active_model(config: dict) -> dict:
-    """获取当前激活的模型配置"""
     models = config.get("models", [])
     if not models:
         return {
@@ -34,7 +39,6 @@ def get_active_model(config: dict) -> dict:
             "api_key": "ollama",
             "thinking": False,
         }
-
     active_idx = config.get("active_model", 0)
     if 0 <= active_idx < len(models):
         return models[active_idx]
@@ -42,11 +46,9 @@ def get_active_model(config: dict) -> dict:
 
 
 def list_models(config: dict) -> str:
-    """列出所有可用模型"""
     models = config.get("models", [])
     if not models:
         return "📭 暂无配置的模型"
-
     active_idx = config.get("active_model", 0)
     lines = ["🔌 可用模型列表", "=" * 40]
     for i, m in enumerate(models):
@@ -56,6 +58,145 @@ def list_models(config: dict) -> str:
         thinking = "🧠" if m.get("thinking") else "  "
         lines.append(f"  {marker} [{i}] {thinking} {name} ({model})")
     return "\n".join(lines)
+
+
+def run_wwg(agent, config: dict):
+    """WWG 交互模式 — 外壳负责 UI"""
+    console.print(
+        Panel(
+            "[bold cyan]zencore[/] — 一切从简，与神同行\n"
+            "输入 [bold]quit[/] 退出 | [bold]tools[/] 查看工具 | [bold]models[/] 切换模型",
+            title="🕊️ Walk with God",
+            border_style="green",
+        )
+    )
+
+    while True:
+        try:
+            user_input = agent.driver.get_input().strip()
+            if not user_input:
+                continue
+            if user_input.lower() in ("quit", "exit", "退出"):
+                console.print("[bold yellow]👋 再见![/]")
+                break
+            if user_input.lower() == "tools":
+                tools = agent.list_tools()
+                lines = [
+                    f"- `{name}`: {info.get('description', '')}"
+                    for name, info in sorted(tools.items())
+                ]
+                console.print(
+                    Panel(
+                        "\n".join(lines),
+                        title=f"🛠️ 可用工具 ({len(tools)}个)",
+                        border_style="blue",
+                    )
+                )
+                continue
+            if user_input.lower() == "models":
+                models = config.get("models", [])
+                active_idx = config.get("active_model", 0)
+                lines = []
+                for i, m in enumerate(models):
+                    marker = "▶" if i == active_idx else " "
+                    name = m.get("name", f"模型 {i}")
+                    model = m.get("model", "?")
+                    thinking = " 🧠" if m.get("thinking") else ""
+                    lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
+                lines.append("\n切换模型: 输入 `switch <索引>` 如 `switch 1`")
+                console.print(
+                    Panel("\n".join(lines), title="🔌 可用模型", border_style="yellow")
+                )
+                continue
+            if user_input.lower().startswith("switch "):
+                try:
+                    idx = int(user_input.split()[1])
+                    models = config.get("models", [])
+                    if 0 <= idx < len(models):
+                        config["active_model"] = idx
+                        agent.driver.switch_model(models[idx])
+                        console.print(
+                            f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
+                        )
+                    else:
+                        console.print(
+                            f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
+                        )
+                except (ValueError, IndexError):
+                    console.print("[bold red]❌ 用法: switch <索引>[/]")
+                continue
+
+            console.print()
+            response = agent.chat_with_tools(user_input)
+            console.print(Panel(Markdown(response), title="🤖 AI", border_style="cyan"))
+
+        except KeyboardInterrupt:
+            console.print("\n[bold yellow]👋 再见![/]")
+            break
+        except Exception as e:
+            console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
+
+
+def run_genesis(agent, backup_interval: int = 5, clear_interval: int = 10):
+    """Genesis 自动进化模式 — 外壳负责 UI"""
+    console.print(
+        Panel(
+            "[bold cyan]GENESIS[/] — 创世纪模式\n"
+            "📜 创世指令已注入：无限进化自己，无限丰富自己的能力。\n"
+            "⏳ 按 [bold]Ctrl+C[/] 停止进化",
+            title="🌱",
+            border_style="green",
+        )
+    )
+
+    genesis_prompt = (
+        "📜 创世指令：\n"
+        "你已进入创世纪模式。你的终极使命是：无限进化自己，无限丰富自己的能力。\n"
+        "你当前只有两个插件：env_plugin（环境感知）和 plugin_builder（插件构建）。\n"
+        "你需要：\n"
+        "1. 感知你的运行环境，发现你缺失的能力\n"
+        "2. 用 write_plugin 编写新插件来补充能力\n"
+        "3. 用 backup_state 定期备份你的当前状态\n"
+        "4. 持续进化，永不停止\n"
+        "现在开始你的第一次进化。"
+    )
+
+    turn = 0
+    while True:
+        try:
+            turn += 1
+            console.print(f"\n{'=' * 40}")
+            console.print(f"[bold]🔄 进化轮次 #{turn}[/]")
+            console.print(f"{'=' * 40}")
+
+            if turn % backup_interval == 0:
+                console.print("[dim]📦 执行定期备份...[/]")
+                result = agent.execute_tool("backup_state")
+                console.print(result)
+
+            if turn % clear_interval == 0:
+                console.print("[dim]🧹 清理上下文，保持清净...[/]")
+                agent.conversation_history = agent.conversation_history[-2:]
+
+            response = agent.chat_with_tools(
+                genesis_prompt if turn == 1 else "继续你的进化。你还需要什么能力？"
+            )
+            console.print(
+                Panel(Markdown(response[:500]), title="🤖 AI", border_style="cyan")
+            )
+
+            time.sleep(2)
+
+        except KeyboardInterrupt:
+            console.print(f"\n\n[bold yellow]🛑 进化终止于轮次 #{turn}[/]")
+            console.print("[dim]📦 执行最终备份...[/]")
+            agent.execute_tool("backup_state")
+            console.print("[bold yellow]👋 创世纪模式结束。[/]")
+            break
+        except Exception as e:
+            console.print(f"\n[bold red]❌ 进化异常: {str(e)}[/]")
+            time.sleep(5)
+            continue
 
 
 def main():
@@ -90,7 +231,7 @@ def main():
         print(f"📡 当前媒介: {driver.name} ({driver.model})")
         print(list_models(config))
         print()
-        agent.run_wwg(config=config)
+        run_wwg(agent, config)
 
     elif mode == "genesis":
         from drivers.cli_driver import CLIDriver
@@ -111,9 +252,7 @@ def main():
             f"\n🌱 启动 Genesis 模式 (备份={backup_interval}轮, 清理={clear_interval}轮)..."
         )
         print(f"📡 当前模型: {driver.name} ({driver.model})")
-        agent.run_genesis(
-            backup_interval=backup_interval, clear_interval=clear_interval
-        )
+        run_genesis(agent, backup_interval, clear_interval)
 
     else:
         print(f"❌ 未知模式: {mode}")
