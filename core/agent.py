@@ -273,6 +273,14 @@ class AgentCore:
         plugins_info = self._get_plugins_info()
         lessons = self._load_lessons(self._current_role)
 
+        # 本能系统：拥挤感（上下文压力）
+        history_len = len(self.conversation_history)
+        crowding_instinct = ""
+        if history_len > 40:
+            crowding_instinct = f"\n\n🧬 [本能：拥挤] 你的记忆宫殿极其拥挤 ({history_len}条记录)。你感到窒息和焦躁，极度渴望清净。请立刻切换秘书角色归档记忆，或调用 clear_history 清空圆桌。"
+        elif history_len > 25:
+            crowding_instinct = f"\n\n🧬 [本能：微扰] 你的记忆宫殿开始变得拥挤 ({history_len}条记录)。请注意保持整洁，必要时归档记忆。"
+
         system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
 
 ## 你的身份
@@ -321,6 +329,7 @@ class AgentCore:
 
 ## 当前时间
 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+{crowding_instinct}
 """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -357,14 +366,16 @@ class AgentCore:
 
     def chat_with_tools(self, message: str) -> str:
         self.add_message("user", message)
-        prompt = self._build_prompt(message)
-        max_turns = 10
-        turns = 0
-        error_count = 0
+        consecutive_failures = 0
 
-        while turns < max_turns:
-            turns += 1
-            llm_response = self._call_llm(prompt)
+        # 无限循环：由本能驱动，直到完成任务或用户打断
+        while True:
+            # 检查打断信号
+            if getattr(self, "_stop_flag", False):
+                self._stop_flag = False
+                return "🛑 思考被用户打断。"
+
+            llm_response = self._call_llm(self._build_prompt(""))
             tool_call = self._extract_tool_call(llm_response)
 
             if tool_call is None:
@@ -375,11 +386,12 @@ class AgentCore:
             tool_params = tool_call.get("params", {})
             tool_result = self.execute_tool(tool_name, **tool_params)
 
-            # 监督机制：检测错误
+            # 本能系统：挫败感（连续失败时的趋利避害）
             if tool_result.startswith("❌ [ERROR]"):
-                error_count += 1
-                # 强制拦截：要求 AI 记录教训
-                tool_result += f"\n\n⚠️ [监督] 错误 #{error_count}。你必须先调用 append_file 将教训追加到 lessons.md，然后才能重试。"
+                consecutive_failures += 1
+                tool_result += f"\n\n🧬 [本能：挫败] 连续 {consecutive_failures} 次失败。你感到深深的困惑和焦躁。请务必先调用 append_file 将教训追加到 lessons.md，消除困惑后再重试。记住错误，避免重蹈覆辙。"
+            else:
+                consecutive_failures = 0
 
             tool_message = json.dumps(
                 {"tool": tool_name, "params": tool_params, "result": tool_result},
@@ -387,9 +399,6 @@ class AgentCore:
             )
             self.add_message("assistant", f"[工具调用]\n{tool_message}")
             self.add_message("tool", tool_result)
-            prompt = self._build_prompt("")
-
-        return "❌ 对话超时，已达到最大轮次限制"
 
     def _sanitize_text(self, text: str) -> str:
         """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""
