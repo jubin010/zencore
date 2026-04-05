@@ -158,11 +158,15 @@ class CLIDriver(DriverInterface):
                     else:
                         ollama_messages.append(msg)
 
-                response = client.chat(
-                    model=self.model,
-                    messages=ollama_messages,
-                    think=self.thinking,
-                )
+                api_kwargs = {
+                    "model": self.model,
+                    "messages": ollama_messages,
+                    "think": self.thinking,
+                }
+                if tools:
+                    api_kwargs["tools"] = tools
+
+                response = client.chat(**api_kwargs)
 
                 thinking = (
                     _sanitize(response.message.thinking)
