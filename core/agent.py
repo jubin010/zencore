@@ -467,12 +467,32 @@ class AgentCore:
 
     def _extract_tool_call(self, response: str) -> Optional[Dict]:
         try:
-            match = re.search(r'\{[^{}]*"tool"[^{}]*\}', response)
-            if match:
-                return json.loads(match.group())
+            # 查找第一个 { 的位置
+            start = response.find("{")
+            if start == -1:
+                return None
+
+            # 匹配嵌套的 JSON 对象（处理嵌套的花括号）
+            depth = 0
+            end = start
+            for i in range(start, len(response)):
+                if response[i] == "{":
+                    depth += 1
+                elif response[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+
+            json_str = response[start:end]
+            data = json.loads(json_str)
+
+            # 验证是否包含 tool 字段
+            if "tool" in data:
+                return data
+            return None
         except:
-            pass
-        return None
+            return None
 
     def send(self, content: str):
         if self.driver:
