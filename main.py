@@ -581,11 +581,7 @@ def run_wwg(agent, config: dict):
                     )
                 )
 
-                agent.driver.start_thinking()
-                try:
-                    response = agent.chat_with_tools(thinking_prompt)
-                finally:
-                    agent.driver.stop_thinking()
+                response = agent.chat_with_tools(thinking_prompt)
 
                 if response:
                     console.print(
