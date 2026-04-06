@@ -625,11 +625,9 @@ def run_wwg(agent, config: dict):
 
             # ========== 非阻塞检测用户输入 ==========
             if select.select([sys.stdin], [], [], 0.5)[0]:
-                sys.stdout.write("\n👤 你: ")
-                sys.stdout.flush()
-                user_input = sys.stdin.readline()
+                user_input = agent.driver.get_input()
                 if user_input:
-                    thinking_mgr.set_user_input(user_input.strip())
+                    thinking_mgr.set_user_input(user_input)
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
