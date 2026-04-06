@@ -48,7 +48,7 @@ class AIThinkingManager:
 
         # 思考控制
         self.next_think_time = None  # 下次 AI Thinking 的触发时间
-        self.think_interval_min = 10  # 保底 10 分钟
+        self.think_interval_min = 1  # 保底 1 分钟（测试用）
 
         # 调研控制
         self.research_data = None
@@ -334,14 +334,12 @@ class AIThinkingManager:
             return False
         if self.next_think_time is None:
             return False
-        # 提前 30 秒提示
-        return time.time() >= self.next_think_time - 30
+        # 提前 10 秒提示（测试用）
+        return time.time() >= self.next_think_time - 10
 
     def calculate_next_think_time(self) -> int:
         """AI 自主决定下次思考间隔（分钟）"""
-        # 默认 15 分钟，AI 可以通过思考后返回来建议更短/更长的间隔
-        # 这里先用固定值，后续可以让 AI 决定
-        return max(self.think_interval_min, 15)
+        return self.think_interval_min  # 测试用 1 分钟
 
     # ========== 状态转换 ==========
 
