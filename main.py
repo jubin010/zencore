@@ -57,7 +57,6 @@ class AIThinkingManager:
         self.max_research_age = 60  # 调研结果最多撑 60 分钟
 
         # 用户输入缓冲
-        self.pending_input = None
         self.has_user_interacted = False  # 第一次必须用户先输入
 
     # ========== 调研机制 ==========
@@ -326,49 +325,11 @@ class AIThinkingManager:
 
         return time.time() >= self.next_think_time
 
-    def should_notify_user(self) -> bool:
-        """是否应该提示用户 AI 即将思考"""
-        if self.state != ThinkingState.IDLE:
-            return False
-        if not self.has_user_interacted:
-            return False
-        if self.next_think_time is None:
-            return False
-        # 提前 10 秒提示（测试用）
-        return time.time() >= self.next_think_time - 10
-
     def calculate_next_think_time(self) -> int:
         """AI 自主决定下次思考间隔（分钟）"""
         return self.think_interval_min  # 测试用 1 分钟
 
     # ========== 状态转换 ==========
-
-    def check_user_input(self) -> bool:
-        """非阻塞检测用户输入，返回是否有输入"""
-        if self.pending_input:
-            return True
-
-        # 使用 select 检测 stdin
-        try:
-            if select.select([sys.stdin], [], [], 0.1)[0]:
-                return True
-        except:
-            pass
-        return False
-
-    def set_user_input(self, user_input: str):
-        """设置待处理的户输入"""
-        self.pending_input = user_input
-
-    def get_pending_input(self) -> str:
-        """获取并清空待处理的户输入"""
-        inp = self.pending_input
-        self.pending_input = None
-        return inp
-
-    def transition_to_user_thinking(self):
-        """转换到 User Thinking 状态"""
-        self.state = ThinkingState.USER_THINKING
 
     def transition_to_ai_thinking(self):
         """转换到 AI Thinking 状态（投骰子决定）"""
@@ -478,13 +439,8 @@ def list_models(config: dict) -> str:
 def run_wwg(agent, config: dict):
     """WWG 统一模式 — Shell 编排 + AgentCore 执行"""
 
-    # 初始化 AI Thinking 管理器
     thinking_mgr = AIThinkingManager(agent, config)
-
-    # 初始调研
     thinking_mgr.do_research()
-
-    # 启用 Tab 补全
     setup_readline(config)
 
     console.print(
@@ -499,154 +455,10 @@ def run_wwg(agent, config: dict):
 
     while True:
         try:
-            # ========== 检查待处理的用户输入 ==========
-            if thinking_mgr.pending_input:
-                thinking_mgr.has_user_interacted = True
-                thinking_mgr.transition_to_user_thinking()
-                user_input = thinking_mgr.get_pending_input()
-
-                # 处理命令
-                if user_input.lower() in ("quit", "exit", "退出"):
-                    console.print("[bold yellow]👋 再见![/]")
-                    break
-
-                if user_input.lower() in ("help", "h", "?"):
-                    console.print(
-                        Panel(
-                            "[bold]可用命令:[/]\n"
-                            "  quit/exit       退出\n"
-                            "  tools           查看工具列表\n"
-                            "  models          查看模型列表\n"
-                            "  switch <n>       切换到模型 n\n"
-                            "  help            显示此帮助\n\n"
-                            "[dim]按 Tab 键自动补全[/]",
-                            title="🆘 帮助",
-                            border_style="blue",
-                        )
-                    )
-                    thinking_mgr.transition_to_idle()
-                    continue
-
-                if user_input.lower() in ("tools",):
-                    tools = agent.list_tools()
-                    lines = [
-                        f"- `{name}`: {info.get('description', '')}"
-                        for name, info in sorted(tools.items())
-                    ]
-                    console.print(
-                        Panel(
-                            "\n".join(lines),
-                            title=f"🛠️ 可用工具 ({len(tools)}个)",
-                            border_style="blue",
-                        )
-                    )
-                    thinking_mgr.transition_to_idle()
-                    continue
-
-                if user_input.lower() == "models":
-                    models = config.get("models", [])
-                    active_idx = config.get("active_model", 0)
-                    lines = []
-                    for i, m in enumerate(models):
-                        marker = "▶" if i == active_idx else " "
-                        name = m.get("name", f"模型 {i}")
-                        model = m.get("model", "?")
-                        thinking = " 🧠" if m.get("thinking") else ""
-                        lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
-                    lines.append("\n切换模型: 输入 `switch <索引>` 如 `switch 1`")
-                    console.print(
-                        Panel(
-                            "\n".join(lines), title="🔌 可用模型", border_style="yellow"
-                        )
-                    )
-                    thinking_mgr.transition_to_idle()
-                    continue
-
-                if user_input.lower().startswith("switch "):
-                    try:
-                        idx = int(user_input.split()[1])
-                        models = config.get("models", [])
-                        if 0 <= idx < len(models):
-                            config["active_model"] = idx
-                            agent.driver.switch_model(models[idx])
-                            console.print(
-                                f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
-                            )
-                        else:
-                            console.print(
-                                f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
-                            )
-                    except (ValueError, IndexError):
-                        console.print("[bold red]❌ 用法: switch <索引>[/]")
-                    thinking_mgr.transition_to_idle()
-                    continue
-
-                # 普通对话
-                console.print()
-                response = agent.chat_with_tools(user_input)
-                console.print(
-                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
-                )
-
-                thinking_mgr.transition_to_idle()
-                continue
-
-            # ========== IDLE 状态：检测是否该 AI Thinking ==========
-            if thinking_mgr.state == ThinkingState.IDLE:
-                if thinking_mgr.should_think():
-                    thinking_mgr.transition_to_ai_thinking()
-
-                    # 根据状态选择对应的 Prompt
-                    if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                        thinking_prompt = thinking_mgr.build_evolution_prompt(
-                            thinking_mgr.research_data
-                        )
-                        title = "🧬 进化思考"
-                    else:
-                        thinking_prompt = thinking_mgr.build_fun_prompt(
-                            thinking_mgr.research_data
-                        )
-                        title = "🎲 趣味思考"
-
-                    # 执行 AI Thinking（使用 AgentCore 执行）
-                    console.print(
-                        Panel(
-                            "[dim]💭 AI 正在思考...[/]",
-                            title=title,
-                            border_style="cyan",
-                        )
-                    )
-
-                    agent.driver.start_thinking()
-                    try:
-                        response = agent.chat_with_tools(thinking_prompt)
-                    finally:
-                        agent.driver.stop_thinking()
-
-                    # 输出思考结果
-                    if response:
-                        console.print(
-                            Panel(
-                                Markdown(response),
-                                title=title,
-                                border_style="cyan",
-                            )
-                        )
-
-                    thinking_mgr.transition_to_idle()
-                    continue
-
             # ========== 检查是否该 AI Thinking ==========
-            # 在用户输入前检查，确保沉默时可以思考
-            if thinking_mgr.state == ThinkingState.IDLE and thinking_mgr.should_think():
-                # 提前提示用户
-                console.print(
-                    "\n[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]"
-                    "\n[dim]输入内容即可打断[/dim]"
-                )
+            if thinking_mgr.has_user_interacted and thinking_mgr.should_think():
                 thinking_mgr.transition_to_ai_thinking()
 
-                # 根据状态选择对应的 Prompt
                 if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
                     thinking_prompt = thinking_mgr.build_evolution_prompt(
                         thinking_mgr.research_data
@@ -658,13 +470,8 @@ def run_wwg(agent, config: dict):
                     )
                     title = "🎲 趣味思考"
 
-                # 执行 AI Thinking
                 console.print(
-                    Panel(
-                        "[dim]💭 AI 正在思考...[/]",
-                        title=title,
-                        border_style="cyan",
-                    )
+                    Panel("[dim]💭 AI 正在思考...[/]", title=title, border_style="cyan")
                 )
 
                 agent.driver.start_thinking()
@@ -673,24 +480,94 @@ def run_wwg(agent, config: dict):
                 finally:
                     agent.driver.stop_thinking()
 
-                # 输出思考结果
                 if response:
                     console.print(
-                        Panel(
-                            Markdown(response),
-                            title=title,
-                            border_style="cyan",
-                        )
+                        Panel(Markdown(response), title=title, border_style="cyan")
                     )
 
                 thinking_mgr.transition_to_idle()
                 continue
 
-            # ========== 等待用户输入 ==========
+            # ========== 等待用户输入（回车发送才算） ==========
             user_input = input("\n👤 你: ").strip()
-            if user_input:
-                thinking_mgr.has_user_interacted = True
-                thinking_mgr.set_user_input(user_input)
+            if not user_input:
+                continue
+
+            thinking_mgr.has_user_interacted = True
+
+            # ========== 处理用户输入 ==========
+            if user_input.lower() in ("quit", "exit", "退出"):
+                console.print("[bold yellow]👋 再见![/]")
+                break
+
+            if user_input.lower() in ("help", "h", "?"):
+                console.print(
+                    Panel(
+                        "[bold]可用命令:[/]\n"
+                        "  quit/exit       退出\n"
+                        "  tools           查看工具列表\n"
+                        "  models          查看模型列表\n"
+                        "  switch <n>      切换到模型 n\n"
+                        "  help            显示此帮助\n\n"
+                        "[dim]按 Tab 键自动补全[/]",
+                        title="🆘 帮助",
+                        border_style="blue",
+                    )
+                )
+                continue
+
+            if user_input.lower() in ("tools",):
+                tools = agent.list_tools()
+                lines = [
+                    f"- `{name}`: {info.get('description', '')}"
+                    for name, info in sorted(tools.items())
+                ]
+                console.print(
+                    Panel(
+                        "\n".join(lines),
+                        title=f"🛠️ 可用工具 ({len(tools)}个)",
+                        border_style="blue",
+                    )
+                )
+                continue
+
+            if user_input.lower() == "models":
+                models = config.get("models", [])
+                active_idx = config.get("active_model", 0)
+                lines = []
+                for i, m in enumerate(models):
+                    marker = "▶" if i == active_idx else " "
+                    name = m.get("name", f"模型 {i}")
+                    model = m.get("model", "?")
+                    thinking = " 🧠" if m.get("thinking") else ""
+                    lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
+                console.print(
+                    Panel("\n".join(lines), title="🔌 可用模型", border_style="yellow")
+                )
+                continue
+
+            if user_input.lower().startswith("switch "):
+                try:
+                    idx = int(user_input.split()[1])
+                    models = config.get("models", [])
+                    if 0 <= idx < len(models):
+                        config["active_model"] = idx
+                        agent.driver.switch_model(models[idx])
+                        console.print(
+                            f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
+                        )
+                    else:
+                        console.print(
+                            f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
+                        )
+                except (ValueError, IndexError):
+                    console.print("[bold red]❌ 用法: switch <索引>[/]")
+                continue
+
+            # 普通对话
+            console.print()
+            response = agent.chat_with_tools(user_input)
+            console.print(Panel(Markdown(response), title="🤖 AI", border_style="cyan"))
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
