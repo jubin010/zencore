@@ -326,6 +326,17 @@ class AIThinkingManager:
 
         return time.time() >= self.next_think_time
 
+    def should_notify_user(self) -> bool:
+        """是否应该提示用户 AI 即将思考"""
+        if self.state != ThinkingState.IDLE:
+            return False
+        if not self.has_user_interacted:
+            return False
+        if self.next_think_time is None:
+            return False
+        # 提前 30 秒提示
+        return time.time() >= self.next_think_time - 30
+
     def calculate_next_think_time(self) -> int:
         """AI 自主决定下次思考间隔（分钟）"""
         # 默认 15 分钟，AI 可以通过思考后返回来建议更短/更长的间隔
@@ -630,6 +641,11 @@ def run_wwg(agent, config: dict):
             # ========== 检查是否该 AI Thinking ==========
             # 在用户输入前检查，确保沉默时可以思考
             if thinking_mgr.state == ThinkingState.IDLE and thinking_mgr.should_think():
+                # 提前提示用户
+                console.print(
+                    "\n[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]"
+                    "\n[dim]输入内容即可打断[/dim]"
+                )
                 thinking_mgr.transition_to_ai_thinking()
 
                 # 根据状态选择对应的 Prompt
