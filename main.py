@@ -469,6 +469,9 @@ def run_wwg(agent, config: dict):
     # 初始调研
     thinking_mgr.do_research()
 
+    # 第一次先等待用户输入，不立即思考
+    thinking_mgr.next_think_time = time.time() + 24 * 60 * 60  # 24小时后
+
     console.print(
         Panel(
             "[bold cyan]zencore[/] — 一切从简，与神同行\n"
