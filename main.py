@@ -494,9 +494,11 @@ def run_wwg(agent, config: dict):
                 continue
 
             # ========== 等待用户输入（回车发送才算） ==========
-            user_input = input("\n👤 你: ").strip()
-            if not user_input:
-                continue
+            try:
+                user_input = input("\n👤 你: ").strip()
+            except EOFError:
+                console.print("\n[bold yellow]👋 再见![/]")
+                break
 
             if not user_input:
                 continue
