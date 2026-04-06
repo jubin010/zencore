@@ -57,7 +57,6 @@ class AIThinkingManager:
         self.max_research_age = 60  # 调研结果最多撑 60 分钟
 
         # 用户输入缓冲
-        self.has_user_ever_input = False  # 用户是否有过输入
 
     # ========== 调研机制 ==========
 
@@ -315,13 +314,9 @@ class AIThinkingManager:
         if self.state != ThinkingState.IDLE:
             return False
 
-        # 必须用户先有过输入
-        if not self.has_user_ever_input:
-            return False
-
         # 检查是否到了思考时间
         if self.next_think_time is None:
-            return True  # 用户已输入过，第一次思考
+            return True  # 第一次思考
 
         return time.time() >= self.next_think_time
 
@@ -441,6 +436,8 @@ def run_wwg(agent, config: dict):
 
     thinking_mgr = AIThinkingManager(agent, config)
     thinking_mgr.do_research()
+    # 程序启动时就设置沉默计时器
+    thinking_mgr.next_think_time = time.time() + thinking_mgr.think_interval_min * 60
     setup_readline(config)
 
     console.print(
@@ -501,8 +498,8 @@ def run_wwg(agent, config: dict):
             if not user_input:
                 continue
 
-            if not thinking_mgr.has_user_ever_input:
-                thinking_mgr.has_user_ever_input = True
+            if not user_input:
+                continue
 
             # 重置沉默计时器
             thinking_mgr.next_think_time = (
