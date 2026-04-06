@@ -574,7 +574,11 @@ def run_wwg(agent, config: dict):
                     title = "🎲 趣味思考"
 
                 console.print(
-                    Panel("[dim]💭 AI 正在思考...[/]", title=title, border_style="cyan")
+                    Panel(
+                        f"[dim]💭 AI 正在思考，请稍候...[/]",
+                        title=title,
+                        border_style="cyan",
+                    )
                 )
 
                 agent.driver.start_thinking()
