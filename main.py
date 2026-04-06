@@ -464,16 +464,31 @@ def run_wwg(agent, config: dict):
         )
     )
 
-    import select
+    import signal
+
+    last_input_time = time.time()
+    thinking_interval = thinking_mgr.think_interval_min * 60
+
+    def alarm_handler(signum, frame):
+        raise TimeoutError()
+
+    signal.signal(signal.SIGALRM, alarm_handler)
 
     while True:
         try:
-            # 用 select 检测输入，超时则触发思考
-            timeout = thinking_mgr.think_interval_min * 60
-            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            # 设置闹钟，超时触发思考
+            signal.alarm(int(thinking_interval))
 
-            if not ready:
+            # 等待用户输入（阻塞，保持 readline 补全）
+            try:
+                user_input = input("\n👤 你: ").strip()
+            except EOFError:
+                console.print("\n[bold yellow]👋 再见![/]")
+                break
+            except TimeoutError:
                 # 超时，触发思考
+                signal.alarm(0)  # 取消闹钟
+
                 thinking_mgr.transition_to_ai_thinking()
 
                 if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
@@ -506,16 +521,12 @@ def run_wwg(agent, config: dict):
                     )
 
                 thinking_mgr.transition_to_idle()
+                last_input_time = time.time()
                 continue
 
-            # 有输入，读取并处理
-            try:
-                user_input = input("\n👤 你: ").strip()
-            except EOFError:
-                console.print("\n[bold yellow]👋 再见![/]")
-                break
-
             if user_input:
+                last_input_time = time.time()
+
                 # 处理用户输入
                 if user_input.lower() in ("quit", "exit", "退出"):
                     console.print("[bold yellow]👋 再见![/]")
