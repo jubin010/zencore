@@ -26,6 +26,13 @@ from rich.markdown import Markdown
 console = Console()
 
 
+def sanitize(text: str) -> str:
+    """净化文本：移除 UTF-8 不支持的代理字符"""
+    import re
+
+    return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
+
+
 # ========== AI Thinking 状态机 ==========
 
 
@@ -544,7 +551,11 @@ def run_wwg(agent, config: dict):
                     console.print()
                     response = agent.chat_with_tools(user_input)
                     console.print(
-                        Panel(Markdown(response), title="🤖 AI", border_style="cyan")
+                        Panel(
+                            Markdown(sanitize(response)),
+                            title="🤖 AI",
+                            border_style="cyan",
+                        )
                     )
 
             else:
@@ -574,7 +585,11 @@ def run_wwg(agent, config: dict):
 
                 if response:
                     console.print(
-                        Panel(Markdown(response), title=title, border_style="cyan")
+                        Panel(
+                            Markdown(sanitize(response)),
+                            title=title,
+                            border_style="cyan",
+                        )
                     )
 
                 thinking_mgr.transition_to_idle()
