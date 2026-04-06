@@ -58,6 +58,7 @@ class AIThinkingManager:
 
         # 用户输入缓冲
         self.pending_input = None
+        self.has_user_interacted = False  # 第一次必须用户先输入
 
     # ========== 调研机制 ==========
 
@@ -315,9 +316,13 @@ class AIThinkingManager:
         if self.state != ThinkingState.IDLE:
             return False
 
+        # 第一次必须用户先输入
+        if not self.has_user_interacted:
+            return False
+
         # 检查是否到了思考时间
         if self.next_think_time is None:
-            return True  # 第一次，强制思考
+            return True  # 用户已输入过，第一次思考
 
         return time.time() >= self.next_think_time
 
@@ -487,6 +492,7 @@ def run_wwg(agent, config: dict):
         try:
             # ========== 检查待处理的用户输入 ==========
             if thinking_mgr.pending_input:
+                thinking_mgr.has_user_interacted = True
                 thinking_mgr.transition_to_user_thinking()
                 user_input = thinking_mgr.get_pending_input()
 
@@ -669,6 +675,7 @@ def run_wwg(agent, config: dict):
             # ========== 等待用户输入 ==========
             user_input = input("\n👤 你: ").strip()
             if user_input:
+                thinking_mgr.has_user_interacted = True
                 thinking_mgr.set_user_input(user_input)
 
         except KeyboardInterrupt:
