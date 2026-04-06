@@ -475,6 +475,7 @@ def run_wwg(agent, config: dict):
 
     # 启用 Tab 补全
     setup_readline(config)
+    print("[DEBUG] Tab 补全已启用，按 Tab 测试")
 
     console.print(
         Panel(
@@ -624,22 +625,10 @@ def run_wwg(agent, config: dict):
                     thinking_mgr.transition_to_idle()
                     continue
 
-            # ========== 用线程检测用户输入，不干扰 readline ==========
-            import threading
-
-            def check_stdin():
-                """后台线程：非阻塞检测 stdin 是否有输入"""
-                try:
-                    if select.select([sys.stdin], [], [], 0.1)[0]:
-                        return True
-                except:
-                    pass
-                return False
-
-            if check_stdin():
-                user_input = input("\n👤 你: ").strip()
-                if user_input:
-                    thinking_mgr.set_user_input(user_input)
+            # ========== 先测试：直接用户输入模式 ==========
+            user_input = input("\n👤 你: ").strip()
+            if user_input:
+                thinking_mgr.set_user_input(user_input)
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
