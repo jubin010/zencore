@@ -57,7 +57,7 @@ class AIThinkingManager:
         self.max_research_age = 60  # 调研结果最多撑 60 分钟
 
         # 用户输入缓冲
-        self.has_user_interacted = False  # 第一次必须用户先输入
+        self.has_user_ever_input = False  # 用户是否有过输入
 
     # ========== 调研机制 ==========
 
@@ -315,8 +315,8 @@ class AIThinkingManager:
         if self.state != ThinkingState.IDLE:
             return False
 
-        # 第一次必须用户先输入
-        if not self.has_user_interacted:
+        # 必须用户先有过输入
+        if not self.has_user_ever_input:
             return False
 
         # 检查是否到了思考时间
@@ -456,7 +456,7 @@ def run_wwg(agent, config: dict):
     while True:
         try:
             # ========== 检查是否该 AI Thinking ==========
-            if thinking_mgr.has_user_interacted and thinking_mgr.should_think():
+            if thinking_mgr.should_think():
                 console.print(
                     Panel(
                         "[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]\n"
@@ -501,7 +501,13 @@ def run_wwg(agent, config: dict):
             if not user_input:
                 continue
 
-            thinking_mgr.has_user_interacted = True
+            if not thinking_mgr.has_user_ever_input:
+                thinking_mgr.has_user_ever_input = True
+
+            # 重置沉默计时器
+            thinking_mgr.next_think_time = (
+                time.time() + thinking_mgr.think_interval_min * 60
+            )
 
             # ========== 处理用户输入 ==========
             if user_input.lower() in ("quit", "exit", "退出"):
