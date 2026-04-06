@@ -462,13 +462,8 @@ def run_wwg(agent, config: dict):
                     console.print("\n[bold yellow]👋 再见![/]")
                     break
 
-                if not user_input:
-                    continue
-
-                # 重置沉默计时器
-                thinking_mgr.next_think_time = (
-                    time.time() + thinking_mgr.think_interval_min * 60
-                )
+            if not user_input:
+                continue
 
                 # ========== 处理用户输入 ==========
                 if user_input.lower() in ("quit", "exit", "退出"):
