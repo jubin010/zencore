@@ -464,78 +464,59 @@ def run_wwg(agent, config: dict):
         )
     )
 
-    import threading
-    import queue
+    import select
 
     last_input_time = [time.time()]
-    input_queue = queue.Queue()
-    thinking_flag = [False]  # AI 是否正在思考
 
     def reset_timer():
         last_input_time[0] = time.time()
 
-    def timer_thread():
-        """后台线程：检测沉默超时"""
-        while True:
-            elapsed = time.time() - last_input_time[0]
-            if elapsed >= thinking_mgr.think_interval_min * 60 and not thinking_flag[0]:
-                # 超时，通知主线程
-                try:
-                    input_queue.put_nowait(("THINK", None))
-                except queue.Full:
-                    pass
-            time.sleep(1)
-
-    timer = threading.Thread(target=timer_thread, daemon=True)
-    timer.start()
-
     while True:
         try:
-            # 检查队列是否有事件
-            try:
-                event, data = input_queue.get_nowait()
-                if event == "THINK":
-                    # 执行 AI 思考
-                    thinking_flag[0] = True
-                    thinking_mgr.transition_to_ai_thinking()
+            # 用 select 检测输入，超时则触发思考
+            timeout = thinking_mgr.think_interval_min * 60
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
 
-                    if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                        thinking_prompt = thinking_mgr.build_evolution_prompt(
-                            thinking_mgr.research_data
-                        )
-                        title = "🧬 进化思考"
-                    else:
-                        thinking_prompt = thinking_mgr.build_fun_prompt(
-                            thinking_mgr.research_data
-                        )
-                        title = "🎲 趣味思考"
+            if not ready:
+                # 超时，触发思考
+                thinking_flag[0] = True
+                thinking_mgr.transition_to_ai_thinking()
 
+                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                    thinking_prompt = thinking_mgr.build_evolution_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🧬 进化思考"
+                else:
+                    thinking_prompt = thinking_mgr.build_fun_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🎲 趣味思考"
+
+                console.print(
+                    Panel(
+                        f"[dim]💭 AI 正在思考，请稍候...[/]",
+                        title=title,
+                        border_style="cyan",
+                    )
+                )
+                reset_timer()
+
+                response = agent.chat_with_tools(thinking_prompt)
+                if response:
                     console.print(
                         Panel(
-                            f"[dim]💭 AI 正在思考，请稍候...[/]",
+                            Markdown(sanitize(response)),
                             title=title,
                             border_style="cyan",
                         )
                     )
-                    reset_timer()
 
-                    response = agent.chat_with_tools(thinking_prompt)
-                    if response:
-                        console.print(
-                            Panel(
-                                Markdown(sanitize(response)),
-                                title=title,
-                                border_style="cyan",
-                            )
-                        )
+                thinking_mgr.transition_to_idle()
+                thinking_flag[0] = False
+                continue
 
-                    thinking_mgr.transition_to_idle()
-                    thinking_flag[0] = False
-                    continue
-            except queue.Empty:
-                pass
-
-            # 等待用户输入（阻塞）
+            # 有输入，读取并处理
             try:
                 user_input = input("\n👤 你: ").strip()
             except EOFError:
@@ -544,6 +525,7 @@ def run_wwg(agent, config: dict):
 
             if user_input:
                 reset_timer()
+
                 # 处理用户输入
                 if user_input.lower() in ("quit", "exit", "退出"):
                     console.print("[bold yellow]👋 再见![/]")
