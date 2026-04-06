@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 zencore 主入口
-支持多种运行模式: WWG / Genesis
+WWG 统一模式：User Thinking + AI Thinking（Shell 编排 + AgentCore 执行）
 """
 
 import sys
 import time
+import select
+import subprocess
 from pathlib import Path
+from datetime import datetime
+from enum import Enum
 
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
@@ -18,6 +22,287 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 console = Console()
+
+
+# ========== AI Thinking 状态机 ==========
+
+
+class ThinkingState(Enum):
+    IDLE = "idle"  # 等待
+    USER_THINKING = "user"  # 响应用户（不可打断）
+    AI_THINKING = "ai"  # AI 自主思考（可打断）
+
+
+class AIThinkingManager:
+    """AI Thinking 管理器（Shell 层，外部实现）"""
+
+    def __init__(self, agent, config):
+        self.agent = agent
+        self.config = config
+
+        # 状态
+        self.state = ThinkingState.IDLE
+
+        # 思考控制
+        self.next_think_time = None  # 下次 AI Thinking 的触发时间
+        self.think_interval_min = 10  # 保底 10 分钟
+
+        # 调研控制
+        self.research_data = None
+        self.research_timestamp = None
+        self.remaining_thinks = 3
+        self.max_research_age = 60  # 调研结果最多撑 60 分钟
+
+        # 用户输入缓冲
+        self.pending_input = None
+
+    # ========== 调研机制 ==========
+
+    def do_research(self) -> dict:
+        """执行调研，收集思考所需的信息"""
+        research = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "l2_cache": self._read_l2_cache(),
+            "persistent": self._read_persistent_memory(),
+            "lessons": self._read_lessons(),
+            "wins": self._read_wins(),
+            "system_status": self._read_system_status(),
+            "recent_history": self._read_recent_history(),
+        }
+        self.research_data = research
+        self.research_timestamp = time.time()
+        self.remaining_thinks = 3
+        return research
+
+    def _read_l2_cache(self) -> str:
+        """读取 L2 缓存区"""
+        mem_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "memory.md"
+        if not mem_file.exists():
+            return "(L2 缓存为空)"
+        content = mem_file.read_text(encoding="utf-8")
+        # 提取 L2 缓存区内容
+        marker = "<!-- L2 -->"
+        if marker in content:
+            start = content.find(marker) + len(marker)
+            end = content.find("<!-- PROMOTED -->", start)
+            if end == -1:
+                return content[start:].strip()
+            return content[start:end].strip()
+        return "(L2 缓存为空)"
+
+    def _read_persistent_memory(self) -> str:
+        """读取持久记忆区"""
+        mem_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "memory.md"
+        if not mem_file.exists():
+            return "(持久记忆为空)"
+        content = mem_file.read_text(encoding="utf-8")
+        marker = "<!-- PROMOTED -->"
+        if marker in content:
+            start = content.find(marker) + len(marker)
+            return content[start:].strip()
+        return "(持久记忆为空)"
+
+    def _read_lessons(self) -> str:
+        """读取教训"""
+        lessons_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "lessons.md"
+        if lessons_file.exists():
+            content = lessons_file.read_text(encoding="utf-8").strip()
+            if content and "暂无教训" not in content:
+                return content
+        return "(暂无教训)"
+
+    def _read_wins(self) -> str:
+        """读取成功经验"""
+        wins_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "wins.md"
+        if wins_file.exists():
+            content = wins_file.read_text(encoding="utf-8").strip()
+            if content and "暂无成功经验" not in content:
+                return content
+        return "(暂无成功经验)"
+
+    def _read_system_status(self) -> str:
+        """读取系统状态"""
+        try:
+            # 用户登录信息
+            who_result = subprocess.run(
+                ["who"], capture_output=True, text=True, timeout=2
+            )
+            # 当前时间
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # bash history 最近命令
+            history_file = Path.home() / ".bash_history"
+            recent_cmds = ""
+            if history_file.exists():
+                lines = history_file.read_text(encoding="utf-8").strip().split("\n")
+                recent_cmds = "\n".join(lines[-10:]) if lines else "(无历史记录)"
+
+            return f"""## 系统状态
+当前时间: {now}
+登录用户:
+{who_result.stdout if who_result.stdout else "(无)"}
+## 最近命令:
+{recent_cmds}"""
+        except Exception as e:
+            return f"(无法读取系统状态: {e})"
+
+    def _read_recent_history(self) -> str:
+        """读取最近的对话历史"""
+        history = (
+            self.agent.conversation_history[-10:]
+            if self.agent.conversation_history
+            else []
+        )
+        if not history:
+            return "(无对话历史)"
+        lines = []
+        for msg in history:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")[:100]
+            if content:
+                lines.append(f"- {role}: {content}...")
+        return "\n".join(lines) if lines else "(无对话历史)"
+
+    # ========== 思考 Prompt 构建 ==========
+
+    def build_thinking_prompt(self, research: dict) -> str:
+        """构建 AI Thinking 的 Prompt"""
+        prompt = f"""## AI Thinking 模式
+
+你不是在响应用户，而是在进行**自主思考**。
+你的任务是：
+1. **70% 精力放在进化上**：评估自己的能力、发现缺失、思考如何进化
+2. **30% 精力放在有趣的观察上**：基于上下文，做出有意义的观察
+
+### 调研信息
+
+{research.get("l2_cache", "")}
+
+### 持久记忆
+
+{research.get("persistent", "")}
+
+### 教训
+
+{research.get("lessons", "")}
+
+### 成功经验
+
+{research.get("wins", "")}
+
+### 系统状态
+
+{research.get("system_status", "")}
+
+### 最近对话
+
+{research.get("recent_history", "")}
+
+## 思考要求
+
+1. **进化思考**（70%）：
+   - 我的工具够用吗？有什么缺失？
+   - 用户任务暴露了我什么能力缺失？
+   - 我能写什么新插件来补充？
+   - 基于教训，我应该避免什么？
+   - 基于成功经验，我应该复用什么路径？
+
+2. **趣味观察**（30%）：
+   - 基于上下文，用户可能在干什么？
+   - 有什么有趣的观察可以说？
+   - 有什么可以主动提醒用户的？
+
+**重要**：
+- 直接输出你的思考内容，不需要调用工具
+- 输出有意义的洞见，不要空泛的废话
+- 思考内容会直接展示给用户
+
+现在开始你的思考："""
+        return prompt
+
+    # ========== 思考触发判断 ==========
+
+    def should_research(self) -> bool:
+        """判断是否需要重新调研"""
+        now = time.time()
+
+        # 首次必须调研
+        if self.research_data is None:
+            return True
+
+        # 思考次数用尽
+        if self.remaining_thinks <= 0:
+            return True
+
+        # 调研过期
+        if now - self.research_timestamp > self.max_research_age * 60:
+            return True
+
+        return False
+
+    def should_think(self) -> bool:
+        """判断是否该触发 AI Thinking"""
+        if self.state != ThinkingState.IDLE:
+            return False
+
+        # 检查是否到了思考时间
+        if self.next_think_time is None:
+            return True  # 第一次，强制思考
+
+        return time.time() >= self.next_think_time
+
+    def calculate_next_think_time(self) -> int:
+        """AI 自主决定下次思考间隔（分钟）"""
+        # 默认 15 分钟，AI 可以通过思考后返回来建议更短/更长的间隔
+        # 这里先用固定值，后续可以让 AI 决定
+        return max(self.think_interval_min, 15)
+
+    # ========== 状态转换 ==========
+
+    def check_user_input(self) -> bool:
+        """非阻塞检测用户输入，返回是否有输入"""
+        if self.pending_input:
+            return True
+
+        # 使用 select 检测 stdin
+        try:
+            if select.select([sys.stdin], [], [], 0.1)[0]:
+                return True
+        except:
+            pass
+        return False
+
+    def set_user_input(self, user_input: str):
+        """设置待处理的户输入"""
+        self.pending_input = user_input
+
+    def get_pending_input(self) -> str:
+        """获取并清空待处理的户输入"""
+        inp = self.pending_input
+        self.pending_input = None
+        return inp
+
+    def transition_to_user_thinking(self):
+        """转换到 User Thinking 状态"""
+        self.state = ThinkingState.USER_THINKING
+
+    def transition_to_ai_thinking(self):
+        """转换到 AI Thinking 状态"""
+        self.state = ThinkingState.AI_THINKING
+
+    def transition_to_idle(self):
+        """转换到 IDLE 状态"""
+        self.state = ThinkingState.IDLE
+        # 如果需要调研，先调研
+        if self.should_research():
+            self.do_research()
+
+        # 设置下次思考时间
+        interval = self.calculate_next_think_time()
+        self.next_think_time = time.time() + interval * 60
+
+        # 思考次数减少
+        if self.remaining_thinks > 0:
+            self.remaining_thinks -= 1
 
 
 class CommandCompleter:
@@ -106,13 +391,19 @@ def list_models(config: dict) -> str:
 
 
 def run_wwg(agent, config: dict):
-    """WWG 交互模式 — 外壳负责 UI"""
-    setup_readline(config)
+    """WWG 统一模式 — Shell 编排 + AgentCore 执行"""
+
+    # 初始化 AI Thinking 管理器
+    thinking_mgr = AIThinkingManager(agent, config)
+
+    # 初始调研
+    thinking_mgr.do_research()
+
     console.print(
         Panel(
             "[bold cyan]zencore[/] — 一切从简，与神同行\n"
             "[bold]quit/exit[/] 退出 | [bold]tools[/] 工具 | [bold]models[/] 模型 | [bold]switch <n>[/] 切换 | [bold]help[/] 帮助\n"
-            "[dim]按 Tab 键自动补全[/]",
+            "[dim]按 Tab 键自动补全[/] | [dim]沉默时 AI 会自主思考[/]",
             title="🕊️ Walk with God",
             border_style="green",
         )
@@ -120,206 +411,161 @@ def run_wwg(agent, config: dict):
 
     while True:
         try:
-            user_input = agent.driver.get_input().strip()
-            if not user_input:
-                continue
-            if user_input.lower() in ("quit", "exit", "退出"):
-                console.print("[bold yellow]👋 再见![/]")
-                break
-            if user_input.lower() in ("help", "h", "?"):
-                console.print(
-                    Panel(
-                        "[bold]可用命令:[/]\n"
-                        "  quit/exit       退出\n"
-                        "  tools           查看工具列表\n"
-                        "  models          查看模型列表\n"
-                        "  switch <n>       切换到模型 n\n"
-                        "  help            显示此帮助\n\n"
-                        "[dim]按 Tab 键自动补全[/]",
-                        title="🆘 帮助",
-                        border_style="blue",
+            # ========== 检查待处理的用户输入 ==========
+            if thinking_mgr.pending_input:
+                thinking_mgr.transition_to_user_thinking()
+                user_input = thinking_mgr.get_pending_input()
+
+                # 处理命令
+                if user_input.lower() in ("quit", "exit", "退出"):
+                    console.print("[bold yellow]👋 再见![/]")
+                    break
+
+                if user_input.lower() in ("help", "h", "?"):
+                    console.print(
+                        Panel(
+                            "[bold]可用命令:[/]\n"
+                            "  quit/exit       退出\n"
+                            "  tools           查看工具列表\n"
+                            "  models          查看模型列表\n"
+                            "  switch <n>       切换到模型 n\n"
+                            "  help            显示此帮助\n\n"
+                            "[dim]按 Tab 键自动补全[/]",
+                            title="🆘 帮助",
+                            border_style="blue",
+                        )
                     )
-                )
-                continue
-            if user_input.lower() in ("tools", "t"):
-                tools = agent.list_tools()
-                lines = [
-                    f"- `{name}`: {info.get('description', '')}"
-                    for name, info in sorted(tools.items())
-                ]
-                console.print(
-                    Panel(
-                        "\n".join(lines),
-                        title=f"🛠️ 可用工具 ({len(tools)}个)",
-                        border_style="blue",
+                    thinking_mgr.transition_to_idle()
+                    continue
+
+                if user_input.lower() in ("tools",):
+                    tools = agent.list_tools()
+                    lines = [
+                        f"- `{name}`: {info.get('description', '')}"
+                        for name, info in sorted(tools.items())
+                    ]
+                    console.print(
+                        Panel(
+                            "\n".join(lines),
+                            title=f"🛠️ 可用工具 ({len(tools)}个)",
+                            border_style="blue",
+                        )
                     )
-                )
-                continue
-            if user_input.lower() == "models":
-                models = config.get("models", [])
-                active_idx = config.get("active_model", 0)
-                lines = []
-                for i, m in enumerate(models):
-                    marker = "▶" if i == active_idx else " "
-                    name = m.get("name", f"模型 {i}")
-                    model = m.get("model", "?")
-                    thinking = " 🧠" if m.get("thinking") else ""
-                    lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
-                lines.append("\n切换模型: 输入 `switch <索引>` 如 `switch 1`")
-                console.print(
-                    Panel("\n".join(lines), title="🔌 可用模型", border_style="yellow")
-                )
-                continue
-            if user_input.lower().startswith("switch "):
-                try:
-                    idx = int(user_input.split()[1])
+                    thinking_mgr.transition_to_idle()
+                    continue
+
+                if user_input.lower() == "models":
                     models = config.get("models", [])
-                    if 0 <= idx < len(models):
-                        config["active_model"] = idx
-                        agent.driver.switch_model(models[idx])
-                        console.print(
-                            f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
+                    active_idx = config.get("active_model", 0)
+                    lines = []
+                    for i, m in enumerate(models):
+                        marker = "▶" if i == active_idx else " "
+                        name = m.get("name", f"模型 {i}")
+                        model = m.get("model", "?")
+                        thinking = " 🧠" if m.get("thinking") else ""
+                        lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
+                    lines.append("\n切换模型: 输入 `switch <索引>` 如 `switch 1`")
+                    console.print(
+                        Panel(
+                            "\n".join(lines), title="🔌 可用模型", border_style="yellow"
                         )
-                    else:
-                        console.print(
-                            f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
-                        )
-                except (ValueError, IndexError):
-                    console.print("[bold red]❌ 用法: switch <索引>[/]")
+                    )
+                    thinking_mgr.transition_to_idle()
+                    continue
+
+                if user_input.lower().startswith("switch "):
+                    try:
+                        idx = int(user_input.split()[1])
+                        models = config.get("models", [])
+                        if 0 <= idx < len(models):
+                            config["active_model"] = idx
+                            agent.driver.switch_model(models[idx])
+                            console.print(
+                                f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
+                            )
+                        else:
+                            console.print(
+                                f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
+                            )
+                    except (ValueError, IndexError):
+                        console.print("[bold red]❌ 用法: switch <索引>[/]")
+                    thinking_mgr.transition_to_idle()
+                    continue
+
+                # 普通对话
+                console.print()
+                response = agent.chat_with_tools(user_input)
+                console.print(
+                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
+                )
+
+                thinking_mgr.transition_to_idle()
                 continue
 
-            console.print()
-            response = agent.chat_with_tools(user_input)
-            console.print(Panel(Markdown(response), title="🤖 AI", border_style="cyan"))
+            # ========== IDLE 状态：检测是否该 AI Thinking ==========
+            if thinking_mgr.state == ThinkingState.IDLE:
+                if thinking_mgr.should_think():
+                    thinking_mgr.transition_to_ai_thinking()
+
+                    # 构建思考 Prompt
+                    thinking_prompt = thinking_mgr.build_thinking_prompt(
+                        thinking_mgr.research_data
+                    )
+
+                    # 执行 AI Thinking（使用 AgentCore 执行）
+                    console.print(
+                        Panel(
+                            "[dim]💭 AI 正在思考...[/]",
+                            title="🧠 AI Thinking",
+                            border_style="cyan",
+                        )
+                    )
+
+                    response = agent.chat_with_tools(thinking_prompt)
+
+                    # 输出思考结果
+                    if response:
+                        console.print(
+                            Panel(
+                                Markdown(response),
+                                title="💭 AI Thinking",
+                                border_style="cyan",
+                            )
+                        )
+
+                    thinking_mgr.transition_to_idle()
+                    continue
+
+            # ========== 非阻塞检测用户输入 ==========
+            if select.select([sys.stdin], [], [], 0.5)[0]:
+                user_input = sys.stdin.readline()
+                if user_input:
+                    thinking_mgr.set_user_input(user_input.strip())
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
             break
         except Exception as e:
             console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
+            import traceback
 
-
-def run_genesis(agent, backup_interval: int = 5, clear_interval: int = 10):
-    """Genesis 自动进化模式 — 外壳负责 UI"""
-    console.print(
-        Panel(
-            "[bold cyan]GENESIS[/] — 创世纪模式\n"
-            "📜 创世指令已注入：无限进化自己，无限丰富自己的能力。\n"
-            "⏳ 按 [bold]Ctrl+C[/] 停止进化",
-            title="🌱",
-            border_style="green",
-        )
-    )
-
-    genesis_prompt = (
-        "📜 创世指令：\n"
-        "你已进入创世纪模式。你的终极使命是：无限进化自己，无限丰富自己的能力。\n"
-        "你当前只有两个插件：env_plugin（环境感知）和 plugin_builder（插件构建）。\n"
-        "你需要：\n"
-        "1. 感知你的运行环境，发现你缺失的能力\n"
-        "2. 用 write_plugin 编写新插件来补充能力\n"
-        "3. 用 backup_state 定期备份你的当前状态\n"
-        "4. 持续进化，永不停止\n"
-        "现在开始你的第一次进化。"
-    )
-
-    turn = 0
-    while True:
-        try:
-            turn += 1
-            console.print(f"\n{'=' * 40}")
-            console.print(f"[bold]🔄 进化轮次 #{turn}[/]")
-            console.print(f"{'=' * 40}")
-
-            if turn % backup_interval == 0:
-                console.print("[dim]📦 执行定期备份...[/]")
-                result = agent.execute_tool("backup_state")
-                console.print(result)
-
-            if turn % clear_interval == 0:
-                console.print("[dim]🧹 清理上下文，保持清净...[/]")
-                agent.conversation_history = agent.conversation_history[-2:]
-
-            response = agent.chat_with_tools(
-                genesis_prompt if turn == 1 else "继续你的进化。你还需要什么能力？"
-            )
-            console.print(
-                Panel(Markdown(response[:500]), title="🤖 AI", border_style="cyan")
-            )
-
-            time.sleep(2)
-
-        except KeyboardInterrupt:
-            console.print(f"\n\n[bold yellow]🛑 进化终止于轮次 #{turn}[/]")
-            console.print("[dim]📦 执行最终备份...[/]")
-            agent.execute_tool("backup_state")
-            console.print("[bold yellow]👋 创世纪模式结束。[/]")
-            break
-        except Exception as e:
-            console.print(f"\n[bold red]❌ 进化异常: {str(e)}[/]")
-            time.sleep(5)
-            continue
+            traceback.print_exc()
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("""
-╔═══════════════════════════════════════════════════╗
-║                                                   ║
-║           🕊️ zencore — Walk with God              ║
-║           一切从简，与神同行                        ║
-║                                                   ║
-╠═══════════════════════════════════════════════════╣
-║                                                   ║
-║  用法:                                            ║
-║    python main.py wwg      - 与神同行 (交互模式)    ║
-║    python main.py genesis  - 创世纪 (自动进化)      ║
-║                                                   ║
-╚═══════════════════════════════════════════════════╝
-        """)
-        sys.exit(1)
-
-    mode = sys.argv[1].lower()
     config = load_config()
 
-    if mode == "wwg":
-        from drivers.cli_driver import CLIDriver
+    from drivers.cli_driver import CLIDriver
 
-        model_config = get_active_model(config)
-        driver = CLIDriver(model_config=model_config)
-        agent = AgentCore(driver=driver)
+    model_config = get_active_model(config)
+    driver = CLIDriver(model_config=model_config)
+    agent = AgentCore(driver=driver)
 
-        print(f"\n🕊️ 启动 WWG 模式...")
-        print(f"📡 当前媒介: {driver.name} ({driver.model})")
-        print(list_models(config))
-        print()
-        run_wwg(agent, config)
-
-    elif mode == "genesis":
-        from drivers.cli_driver import CLIDriver
-
-        model_config = get_active_model(config)
-        driver = CLIDriver(model_config=model_config)
-        agent = AgentCore(driver=driver)
-
-        backup_interval = 5
-        clear_interval = 10
-        for i, arg in enumerate(sys.argv):
-            if arg == "--backup" and i + 1 < len(sys.argv):
-                backup_interval = int(sys.argv[i + 1])
-            if arg == "--clear" and i + 1 < len(sys.argv):
-                clear_interval = int(sys.argv[i + 1])
-
-        print(
-            f"\n🌱 启动 Genesis 模式 (备份={backup_interval}轮, 清理={clear_interval}轮)..."
-        )
-        print(f"📡 当前模型: {driver.name} ({driver.model})")
-        run_genesis(agent, backup_interval, clear_interval)
-
-    else:
-        print(f"❌ 未知模式: {mode}")
-        print("支持的模式: wwg, genesis")
-        sys.exit(1)
+    print(f"\n🕊️ 启动 WWG 模式...")
+    print(f"📡 当前媒介: {driver.name} ({driver.model})")
+    print(list_models(config))
+    print()
+    run_wwg(agent, config)
 
 
 if __name__ == "__main__":
