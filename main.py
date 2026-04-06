@@ -470,12 +470,8 @@ def run_wwg(agent, config: dict):
     # 初始调研
     thinking_mgr.do_research()
 
-    # 第一次先等待用户输入，不立即思考
-    thinking_mgr.next_think_time = time.time() + 24 * 60 * 60  # 24小时后
-
     # 启用 Tab 补全
     setup_readline(config)
-    print("[DEBUG] Tab 补全已启用，按 Tab 测试")
 
     console.print(
         Panel(
@@ -625,7 +621,52 @@ def run_wwg(agent, config: dict):
                     thinking_mgr.transition_to_idle()
                     continue
 
-            # ========== 先测试：直接用户输入模式 ==========
+            # ========== 检查是否该 AI Thinking ==========
+            # 在用户输入前检查，确保沉默时可以思考
+            if thinking_mgr.state == ThinkingState.IDLE and thinking_mgr.should_think():
+                thinking_mgr.transition_to_ai_thinking()
+
+                # 根据状态选择对应的 Prompt
+                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                    thinking_prompt = thinking_mgr.build_evolution_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🧬 进化思考"
+                else:
+                    thinking_prompt = thinking_mgr.build_fun_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🎲 趣味思考"
+
+                # 执行 AI Thinking
+                console.print(
+                    Panel(
+                        "[dim]💭 AI 正在思考...[/]",
+                        title=title,
+                        border_style="cyan",
+                    )
+                )
+
+                agent.driver.start_thinking()
+                try:
+                    response = agent.chat_with_tools(thinking_prompt)
+                finally:
+                    agent.driver.stop_thinking()
+
+                # 输出思考结果
+                if response:
+                    console.print(
+                        Panel(
+                            Markdown(response),
+                            title=title,
+                            border_style="cyan",
+                        )
+                    )
+
+                thinking_mgr.transition_to_idle()
+                continue
+
+            # ========== 等待用户输入 ==========
             user_input = input("\n👤 你: ").strip()
             if user_input:
                 thinking_mgr.set_user_input(user_input)
