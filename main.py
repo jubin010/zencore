@@ -625,7 +625,7 @@ def run_wwg(agent, config: dict):
 
             # ========== 非阻塞检测用户输入 ==========
             if select.select([sys.stdin], [], [], 0.5)[0]:
-                user_input = agent.driver.get_input()
+                user_input = input("\n👤 你: ").strip()
                 if user_input:
                     thinking_mgr.set_user_input(user_input)
 
