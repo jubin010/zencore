@@ -6,10 +6,10 @@ WWG 统一模式：User Thinking + AI Thinking（Shell 编排 + AgentCore 执行
 
 import sys
 import time
-import select
 import subprocess
 import random
-import os
+import queue
+import threading
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -465,59 +465,77 @@ def run_wwg(agent, config: dict):
     )
 
     import threading
+    import queue
 
-    silence_timer = threading.Event()
-    last_input_time = [time.time()]  # 用 list 方便在闭包中修改
+    last_input_time = [time.time()]
+    input_queue = queue.Queue()
+    thinking_flag = [False]  # AI 是否正在思考
 
-    def reset_silence_timer():
+    def reset_timer():
         last_input_time[0] = time.time()
 
-    def check_silence():
-        """检查沉默是否超时"""
-        elapsed = time.time() - last_input_time[0]
-        return elapsed >= thinking_mgr.think_interval_min * 60
+    def timer_thread():
+        """后台线程：检测沉默超时"""
+        while True:
+            elapsed = time.time() - last_input_time[0]
+            if elapsed >= thinking_mgr.think_interval_min * 60 and not thinking_flag[0]:
+                # 超时，通知主线程
+                try:
+                    input_queue.put_nowait(("THINK", None))
+                except queue.Full:
+                    pass
+            time.sleep(1)
+
+    timer = threading.Thread(target=timer_thread, daemon=True)
+    timer.start()
 
     while True:
         try:
-            # 检查沉默超时
-            if check_silence():
-                # 执行 AI 思考
-                thinking_mgr.transition_to_ai_thinking()
+            # 检查队列是否有事件
+            try:
+                event, data = input_queue.get_nowait()
+                if event == "THINK":
+                    # 执行 AI 思考
+                    thinking_flag[0] = True
+                    thinking_mgr.transition_to_ai_thinking()
 
-                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                    thinking_prompt = thinking_mgr.build_evolution_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🧬 进化思考"
-                else:
-                    thinking_prompt = thinking_mgr.build_fun_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🎲 趣味思考"
+                    if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                        thinking_prompt = thinking_mgr.build_evolution_prompt(
+                            thinking_mgr.research_data
+                        )
+                        title = "🧬 进化思考"
+                    else:
+                        thinking_prompt = thinking_mgr.build_fun_prompt(
+                            thinking_mgr.research_data
+                        )
+                        title = "🎲 趣味思考"
 
-                console.print(
-                    Panel(
-                        f"[dim]💭 AI 正在思考，请稍候...[/]",
-                        title=title,
-                        border_style="cyan",
-                    )
-                )
-                reset_silence_timer()
-
-                response = agent.chat_with_tools(thinking_prompt)
-                if response:
                     console.print(
                         Panel(
-                            Markdown(sanitize(response)),
+                            f"[dim]💭 AI 正在思考，请稍候...[/]",
                             title=title,
                             border_style="cyan",
                         )
                     )
+                    reset_timer()
 
-                thinking_mgr.transition_to_idle()
-                continue
+                    response = agent.chat_with_tools(thinking_prompt)
+                    if response:
+                        console.print(
+                            Panel(
+                                Markdown(sanitize(response)),
+                                title=title,
+                                border_style="cyan",
+                            )
+                        )
 
-            # 等待用户输入
+                    thinking_mgr.transition_to_idle()
+                    thinking_flag[0] = False
+                    continue
+            except queue.Empty:
+                pass
+
+            # 等待用户输入（阻塞）
             try:
                 user_input = input("\n👤 你: ").strip()
             except EOFError:
@@ -525,6 +543,7 @@ def run_wwg(agent, config: dict):
                 break
 
             if user_input:
+                reset_timer()
                 # 处理用户输入
                 if user_input.lower() in ("quit", "exit", "退出"):
                     console.print("[bold yellow]👋 再见![/]")
