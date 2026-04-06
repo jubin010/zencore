@@ -439,8 +439,6 @@ def run_wwg(agent, config: dict):
 
     thinking_mgr = AIThinkingManager(agent, config)
     thinking_mgr.do_research()
-    # 启动时不设置 next_think_time，让第一次思考立即触发
-    # next_think_time = None 表示"还没思考过"
     setup_readline(config)
 
     console.print(
@@ -455,170 +453,131 @@ def run_wwg(agent, config: dict):
 
     while True:
         try:
-            # 检查是否有等待中的用户输入（思考被打断时捕获的）
-            if thinking_mgr.pending_thinking_input:
-                user_input = thinking_mgr.pending_thinking_input
-                thinking_mgr.pending_thinking_input = None
-            # 使用 select 非阻塞检测输入，1秒超时
-            if select.select([sys.stdin], [], [], 1)[0]:
-                # 有输入
+            # 用 select 等待输入，超时后执行思考
+            # timeout = think_interval * 60 秒
+            timeout = thinking_mgr.think_interval_min * 60
+
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+
+            if ready:
+                # 有用户输入
                 try:
                     user_input = input("\n👤 你: ").strip()
                 except EOFError:
                     console.print("\n[bold yellow]👋 再见![/]")
                     break
 
-                if not user_input:
-                    continue
+                if user_input:
+                    # 处理用户输入
+                    if user_input.lower() in ("quit", "exit", "退出"):
+                        console.print("[bold yellow]👋 再见![/]")
+                        break
 
-                # ========== 处理用户输入 ==========
-                if user_input.lower() in ("quit", "exit", "退出"):
-                    console.print("[bold yellow]👋 再见![/]")
-                    break
-
-                if user_input.lower() in ("help", "h", "?"):
-                    console.print(
-                        Panel(
-                            "[bold]可用命令:[/]\n"
-                            "  quit/exit       退出\n"
-                            "  tools           查看工具列表\n"
-                            "  models          查看模型列表\n"
-                            "  switch <n>      切换到模型 n\n"
-                            "  help            显示此帮助\n\n"
-                            "[dim]按 Tab 键自动补全[/]",
-                            title="🆘 帮助",
-                            border_style="blue",
-                        )
-                    )
-                    continue
-
-                if user_input.lower() in ("tools",):
-                    tools = agent.list_tools()
-                    lines = [
-                        f"- `{name}`: {info.get('description', '')}"
-                        for name, info in sorted(tools.items())
-                    ]
-                    console.print(
-                        Panel(
-                            "\n".join(lines),
-                            title=f"🛠️ 可用工具 ({len(tools)}个)",
-                            border_style="blue",
-                        )
-                    )
-                    continue
-
-                if user_input.lower() == "models":
-                    models = config.get("models", [])
-                    active_idx = config.get("active_model", 0)
-                    lines = []
-                    for i, m in enumerate(models):
-                        marker = "▶" if i == active_idx else " "
-                        name = m.get("name", f"模型 {i}")
-                        model = m.get("model", "?")
-                        thinking = " 🧠" if m.get("thinking") else ""
-                        lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
-                    console.print(
-                        Panel(
-                            "\n".join(lines), title="🔌 可用模型", border_style="yellow"
-                        )
-                    )
-                    continue
-
-                if user_input.lower().startswith("switch "):
-                    try:
-                        idx = int(user_input.split()[1])
-                        models = config.get("models", [])
-                        if 0 <= idx < len(models):
-                            config["active_model"] = idx
-                            agent.driver.switch_model(models[idx])
-                            console.print(
-                                f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
-                            )
-                        else:
-                            console.print(
-                                f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
-                            )
-                    except (ValueError, IndexError):
-                        console.print("[bold red]❌ 用法: switch <索引>[/]")
-                    continue
-
-                # 普通对话
-                console.print()
-                response = agent.chat_with_tools(user_input)
-                console.print(
-                    Panel(Markdown(response), title="🤖 AI", border_style="cyan")
-                )
-
-            else:
-                # 1秒超时，检查是否该思考
-                if thinking_mgr.should_think():
-                    # 显示提示，给用户最后一次输入机会
-                    console.print(
-                        Panel(
-                            "[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]\n"
-                            "[dim]输入内容即可打断[/dim]",
-                            title="💡 系统",
-                            border_style="yellow",
-                        )
-                    )
-
-                    # 给用户 3 秒时间输入来打断
-                    user_input = None
-                    for _ in range(30):  # 30 次 * 0.1 秒 = 3 秒
-                        import time as time_module
-
-                        time_module.sleep(0.1)
-                        if select.select([sys.stdin], [], [], 0)[0]:
-                            # 用户输入了，打断思考
-                            try:
-                                user_input = input("\n👤 你: ").strip()
-                            except EOFError:
-                                console.print("\n[bold yellow]👋 再见![/]")
-                                break
-                            if user_input:
-                                thinking_mgr.next_think_time = (
-                                    time_module.time()
-                                    + thinking_mgr.think_interval_min * 60
-                                )
-                                thinking_mgr.pending_thinking_input = user_input
-                            break
-                    else:
-                        # 3 秒内没有用户输入，执行思考
-                        thinking_mgr.transition_to_ai_thinking()
-
-                        if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                            thinking_prompt = thinking_mgr.build_evolution_prompt(
-                                thinking_mgr.research_data
-                            )
-                            title = "🧬 进化思考"
-                        else:
-                            thinking_prompt = thinking_mgr.build_fun_prompt(
-                                thinking_mgr.research_data
-                            )
-                            title = "🎲 趣味思考"
-
+                    if user_input.lower() in ("help", "h", "?"):
                         console.print(
                             Panel(
-                                "[dim]💭 AI 正在思考...[/]",
-                                title=title,
-                                border_style="cyan",
+                                "[bold]可用命令:[/]\n"
+                                "  quit/exit       退出\n"
+                                "  tools           查看工具列表\n"
+                                "  models          查看模型列表\n"
+                                "  switch <n>      切换到模型 n\n"
+                                "  help            显示此帮助",
+                                title="🆘 帮助",
+                                border_style="blue",
                             )
                         )
+                        continue
 
-                        agent.driver.start_thinking()
-                        try:
-                            response = agent.chat_with_tools(thinking_prompt)
-                        finally:
-                            agent.driver.stop_thinking()
-
-                        if response:
-                            console.print(
-                                Panel(
-                                    Markdown(response), title=title, border_style="cyan"
-                                )
+                    if user_input.lower() in ("tools",):
+                        tools = agent.list_tools()
+                        lines = [
+                            f"- `{name}`: {info.get('description', '')}"
+                            for name, info in sorted(tools.items())
+                        ]
+                        console.print(
+                            Panel(
+                                "\n".join(lines),
+                                title=f"🛠️ 可用工具 ({len(tools)}个)",
+                                border_style="blue",
                             )
+                        )
+                        continue
 
-                        thinking_mgr.transition_to_idle()
+                    if user_input.lower() == "models":
+                        models = config.get("models", [])
+                        active_idx = config.get("active_model", 0)
+                        lines = []
+                        for i, m in enumerate(models):
+                            marker = "▶" if i == active_idx else " "
+                            name = m.get("name", f"模型 {i}")
+                            model = m.get("model", "?")
+                            thinking = " 🧠" if m.get("thinking") else ""
+                            lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
+                        console.print(
+                            Panel(
+                                "\n".join(lines),
+                                title="🔌 可用模型",
+                                border_style="yellow",
+                            )
+                        )
+                        continue
+
+                    if user_input.lower().startswith("switch "):
+                        try:
+                            idx = int(user_input.split()[1])
+                            models = config.get("models", [])
+                            if 0 <= idx < len(models):
+                                config["active_model"] = idx
+                                agent.driver.switch_model(models[idx])
+                                console.print(
+                                    f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
+                                )
+                            else:
+                                console.print(
+                                    f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
+                                )
+                        except (ValueError, IndexError):
+                            console.print("[bold red]❌ 用法: switch <索引>[/]")
+                        continue
+
+                    # 普通对话
+                    console.print()
+                    response = agent.chat_with_tools(user_input)
+                    console.print(
+                        Panel(Markdown(response), title="🤖 AI", border_style="cyan")
+                    )
+
+            else:
+                # 超时，执行 AI 思考
+                thinking_mgr.transition_to_ai_thinking()
+
+                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                    thinking_prompt = thinking_mgr.build_evolution_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🧬 进化思考"
+                else:
+                    thinking_prompt = thinking_mgr.build_fun_prompt(
+                        thinking_mgr.research_data
+                    )
+                    title = "🎲 趣味思考"
+
+                console.print(
+                    Panel("[dim]💭 AI 正在思考...[/]", title=title, border_style="cyan")
+                )
+
+                agent.driver.start_thinking()
+                try:
+                    response = agent.chat_with_tools(thinking_prompt)
+                finally:
+                    agent.driver.stop_thinking()
+
+                if response:
+                    console.print(
+                        Panel(Markdown(response), title=title, border_style="cyan")
+                    )
+
+                thinking_mgr.transition_to_idle()
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
