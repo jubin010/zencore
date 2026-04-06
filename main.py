@@ -8,6 +8,7 @@ import sys
 import time
 import select
 import subprocess
+import random
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -30,7 +31,8 @@ console = Console()
 class ThinkingState(Enum):
     IDLE = "idle"  # 等待
     USER_THINKING = "user"  # 响应用户（不可打断）
-    AI_THINKING = "ai"  # AI 自主思考（可打断）
+    EVOLUTION_THINKING = "evolution"  # 进化思考（70%）
+    FUN_THINKING = "fun"  # 趣味思考（30%）
 
 
 class AIThinkingManager:
@@ -164,14 +166,18 @@ class AIThinkingManager:
 
     # ========== 思考 Prompt 构建 ==========
 
-    def build_thinking_prompt(self, research: dict) -> str:
-        """构建 AI Thinking 的 Prompt"""
-        prompt = f"""## AI Thinking 模式
+    def roll_dice(self) -> ThinkingState:
+        """投掷骰子，决定思考类型"""
+        if random.random() < 0.7:
+            return ThinkingState.EVOLUTION_THINKING
+        return ThinkingState.FUN_THINKING
+
+    def build_evolution_prompt(self, research: dict) -> str:
+        """构建进化思考的 Prompt"""
+        prompt = f"""## 进化思考模式
 
 你不是在响应用户，而是在进行**自主思考**。
-你的任务是：
-1. **70% 精力放在进化上**：评估自己的能力、发现缺失、思考如何进化
-2. **30% 精力放在有趣的观察上**：基于上下文，做出有意义的观察
+你的核心任务是：**进化自己**
 
 ### 调研信息
 
@@ -197,26 +203,90 @@ class AIThinkingManager:
 
 {research.get("recent_history", "")}
 
-## 思考要求
+## 进化思考要求
 
-1. **进化思考**（70%）：
+专注于以下问题，给出有意义的洞见：
+
+1. **能力评估**：
    - 我的工具够用吗？有什么缺失？
-   - 用户任务暴露了我什么能力缺失？
-   - 我能写什么新插件来补充？
-   - 基于教训，我应该避免什么？
-   - 基于成功经验，我应该复用什么路径？
+   - 用户最近的任务暴露了我什么能力缺失？
 
-2. **趣味观察**（30%）：
-   - 基于上下文，用户可能在干什么？
-   - 有什么有趣的观察可以说？
-   - 有什么可以主动提醒用户的？
+2. **进化方向**：
+   - 我能写什么新插件来补充缺失的能力？
+   - 我应该如何改进现有的工具？
+
+3. **经验复用**：
+   - 基于教训，我应该避免什么？
+   - 基于成功经验，我应该复用什么有效的路径？
+
+4. **具体建议**：
+   - 下一次遇到类似情况，我应该怎么做？
 
 **重要**：
 - 直接输出你的思考内容，不需要调用工具
-- 输出有意义的洞见，不要空泛的废话
+- 输出有意义的进化洞见，不要空泛的废话
 - 思考内容会直接展示给用户
 
-现在开始你的思考："""
+现在开始你的进化思考："""
+        return prompt
+
+    def build_fun_prompt(self, research: dict) -> str:
+        """构建趣味思考的 Prompt"""
+        prompt = f"""## 趣味思考模式
+
+你不是在响应用户，而是在进行**自主思考**。
+你的任务是：基于上下文，做出有意义的趣味观察。
+
+### 调研信息
+
+{research.get("l2_cache", "")}
+
+### 持久记忆
+
+{research.get("persistent", "")}
+
+### 教训
+
+{research.get("lessons", "")}
+
+### 成功经验
+
+{research.get("wins", "")}
+
+### 系统状态
+
+{research.get("system_status", "")}
+
+### 最近对话
+
+{research.get("recent_history", "")}
+
+## 趣味思考要求
+
+基于以上信息，做出有意义的观察：
+
+1. **观察用户**：
+   - 用户可能在干什么？（基于系统状态、历史命令）
+   - 用户的行为模式有什么有趣的地方？
+
+2. **观察自己**：
+   - 我最近有什么有趣的表现？
+   - 我和用户的互动有什么值得关注的？
+
+3. **主动关心**：
+   - 有什么可以主动提醒用户的？
+   - 用户可能需要什么帮助？
+
+4. **有意义的闲聊**：
+   - 有什么有趣但有意义的观察可以说？
+   - 如何让用户感受到我在"活着"？
+
+**重要**：
+- 观察要有意义，扎根于上下文，不要天马行空
+- 可以有一点点幽默，但要得体
+- 直接输出你的思考内容，思考内容会直接展示给用户
+
+现在开始你的趣味思考："""
         return prompt
 
     # ========== 思考触发判断 ==========
@@ -286,8 +356,8 @@ class AIThinkingManager:
         self.state = ThinkingState.USER_THINKING
 
     def transition_to_ai_thinking(self):
-        """转换到 AI Thinking 状态"""
-        self.state = ThinkingState.AI_THINKING
+        """转换到 AI Thinking 状态（投骰子决定）"""
+        self.state = self.roll_dice()
 
     def transition_to_idle(self):
         """转换到 IDLE 状态"""
@@ -507,16 +577,23 @@ def run_wwg(agent, config: dict):
                 if thinking_mgr.should_think():
                     thinking_mgr.transition_to_ai_thinking()
 
-                    # 构建思考 Prompt
-                    thinking_prompt = thinking_mgr.build_thinking_prompt(
-                        thinking_mgr.research_data
-                    )
+                    # 根据状态选择对应的 Prompt
+                    if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                        thinking_prompt = thinking_mgr.build_evolution_prompt(
+                            thinking_mgr.research_data
+                        )
+                        title = "🧬 进化思考"
+                    else:
+                        thinking_prompt = thinking_mgr.build_fun_prompt(
+                            thinking_mgr.research_data
+                        )
+                        title = "🎲 趣味思考"
 
                     # 执行 AI Thinking（使用 AgentCore 执行）
                     console.print(
                         Panel(
                             "[dim]💭 AI 正在思考...[/]",
-                            title="🧠 AI Thinking",
+                            title=title,
                             border_style="cyan",
                         )
                     )
@@ -528,7 +605,7 @@ def run_wwg(agent, config: dict):
                         console.print(
                             Panel(
                                 Markdown(response),
-                                title="💭 AI Thinking",
+                                title=title,
                                 border_style="cyan",
                             )
                         )
