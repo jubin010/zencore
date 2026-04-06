@@ -57,6 +57,7 @@ class AIThinkingManager:
         self.max_research_age = 60  # 调研结果最多撑 60 分钟
 
         # 用户输入缓冲
+        self.pending_thinking_input = None  # 思考被打断时的用户输入
 
     # ========== 调研机制 ==========
 
@@ -316,7 +317,9 @@ class AIThinkingManager:
 
         # 检查是否到了思考时间
         if self.next_think_time is None:
-            return True  # 第一次思考
+            # 第一次：设置计时器，等待 interval
+            self.next_think_time = time.time() + self.think_interval_min * 60
+            return False
 
         return time.time() >= self.next_think_time
 
@@ -452,7 +455,10 @@ def run_wwg(agent, config: dict):
 
     while True:
         try:
-            # ========== 检查是否该 AI Thinking ==========
+            # 检查是否有等待中的用户输入（思考被打断时捕获的）
+            if thinking_mgr.pending_thinking_input:
+                user_input = thinking_mgr.pending_thinking_input
+                thinking_mgr.pending_thinking_input = None
             # 使用 select 非阻塞检测输入，1秒超时
             if select.select([sys.stdin], [], [], 1)[0]:
                 # 有输入
@@ -546,6 +552,7 @@ def run_wwg(agent, config: dict):
             else:
                 # 1秒超时，检查是否该思考
                 if thinking_mgr.should_think():
+                    # 显示提示，给用户最后一次输入机会
                     console.print(
                         Panel(
                             "[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]\n"
@@ -554,36 +561,64 @@ def run_wwg(agent, config: dict):
                             border_style="yellow",
                         )
                     )
-                    thinking_mgr.transition_to_ai_thinking()
 
-                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                    thinking_prompt = thinking_mgr.build_evolution_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🧬 进化思考"
-                else:
-                    thinking_prompt = thinking_mgr.build_fun_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🎲 趣味思考"
+                    # 给用户 3 秒时间输入来打断
+                    user_input = None
+                    for _ in range(30):  # 30 次 * 0.1 秒 = 3 秒
+                        import time as time_module
 
-                console.print(
-                    Panel("[dim]💭 AI 正在思考...[/]", title=title, border_style="cyan")
-                )
+                        time_module.sleep(0.1)
+                        if select.select([sys.stdin], [], [], 0)[0]:
+                            # 用户输入了，打断思考
+                            try:
+                                user_input = input("\n👤 你: ").strip()
+                            except EOFError:
+                                console.print("\n[bold yellow]👋 再见![/]")
+                                break
+                            if user_input:
+                                thinking_mgr.next_think_time = (
+                                    time_module.time()
+                                    + thinking_mgr.think_interval_min * 60
+                                )
+                                thinking_mgr.pending_thinking_input = user_input
+                            break
+                    else:
+                        # 3 秒内没有用户输入，执行思考
+                        thinking_mgr.transition_to_ai_thinking()
 
-                agent.driver.start_thinking()
-                try:
-                    response = agent.chat_with_tools(thinking_prompt)
-                finally:
-                    agent.driver.stop_thinking()
+                        if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
+                            thinking_prompt = thinking_mgr.build_evolution_prompt(
+                                thinking_mgr.research_data
+                            )
+                            title = "🧬 进化思考"
+                        else:
+                            thinking_prompt = thinking_mgr.build_fun_prompt(
+                                thinking_mgr.research_data
+                            )
+                            title = "🎲 趣味思考"
 
-                if response:
-                    console.print(
-                        Panel(Markdown(response), title=title, border_style="cyan")
-                    )
+                        console.print(
+                            Panel(
+                                "[dim]💭 AI 正在思考...[/]",
+                                title=title,
+                                border_style="cyan",
+                            )
+                        )
 
-                thinking_mgr.transition_to_idle()
-                continue
+                        agent.driver.start_thinking()
+                        try:
+                            response = agent.chat_with_tools(thinking_prompt)
+                        finally:
+                            agent.driver.stop_thinking()
+
+                        if response:
+                            console.print(
+                                Panel(
+                                    Markdown(response), title=title, border_style="cyan"
+                                )
+                            )
+
+                        thinking_mgr.transition_to_idle()
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
