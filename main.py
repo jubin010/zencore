@@ -28,9 +28,15 @@ console = Console()
 
 def sanitize(text: str) -> str:
     """净化文本：移除 UTF-8 不支持的代理字符"""
+    if not text:
+        return ""
     import re
 
-    return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
+    # 移除 surrogate 字符
+    text = re.sub(r"[\ud800-\udfff]", "", text)
+    # 移除其他非法字符
+    text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+    return text
 
 
 # ========== AI Thinking 状态机 ==========
@@ -461,7 +467,6 @@ def run_wwg(agent, config: dict):
     while True:
         try:
             # 用 select 等待输入，超时后执行思考
-            # timeout = think_interval * 60 秒
             timeout = thinking_mgr.think_interval_min * 60
 
             ready, _, _ = select.select([sys.stdin], [], [], timeout)
@@ -473,6 +478,8 @@ def run_wwg(agent, config: dict):
                 except EOFError:
                     console.print("\n[bold yellow]👋 再见![/]")
                     break
+                except Exception:
+                    continue
 
                 if user_input:
                     # 处理用户输入
