@@ -472,6 +472,9 @@ def run_wwg(agent, config: dict):
     # 第一次先等待用户输入，不立即思考
     thinking_mgr.next_think_time = time.time() + 24 * 60 * 60  # 24小时后
 
+    # 启用 Tab 补全
+    setup_readline(config)
+
     console.print(
         Panel(
             "[bold cyan]zencore[/] — 一切从简，与神同行\n"
@@ -622,6 +625,8 @@ def run_wwg(agent, config: dict):
 
             # ========== 非阻塞检测用户输入 ==========
             if select.select([sys.stdin], [], [], 0.5)[0]:
+                sys.stdout.write("\n👤 你: ")
+                sys.stdout.flush()
                 user_input = sys.stdin.readline()
                 if user_input:
                     thinking_mgr.set_user_input(user_input.strip())
