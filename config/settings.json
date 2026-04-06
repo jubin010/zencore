@@ -1,5 +1,5 @@
 {
-  "active_model": 1,
+  "active_model": 0,
   "models": [
     {
       "name": "本地 Ollama",
@@ -7,14 +7,6 @@
       "model": "qwen3.5:9b",
       "api_key": "ollama",
       "thinking": true
-    },
-    {
-      "name": "MiniMax M2.7",
-      "host": "https://api.minimaxi.com/v1",
-      "model": "MiniMax-M2.7",
-      "api_key": "YOUR_API_KEY_HERE",
-      "thinking": true,
-      "thinking_mode": "reasoning_split"
     }
   ]
 }

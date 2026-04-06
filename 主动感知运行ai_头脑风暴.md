@@ -508,5 +508,92 @@ shell.print(result)
 
 ---
 
-*文档版本：v0.4*
-*状态：架构哲学已确定 — Shell 编排 + AgentCore 执行*
+## 十二、实现状态（v0.5）
+
+### 12.1 分支
+
+- `feature/ai-thinking` - AI Thinking 功能开发分支
+
+### 12.2 已实现功能
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 状态机 | ✅ | IDLE / USER_THINKING / EVOLUTION_THINKING / FUN_THINKING |
+| 调研机制 | ✅ | L2缓存、持久记忆、教训、成功经验、系统状态、历史命令 |
+| 骰子机制 | ✅ | random.random() < 0.7 决定进化或趣味 |
+| 思考触发 | ✅ | 保底10分钟，AI决定间隔（默认15分钟） |
+| 调研复用 | ✅ | 3次思考或60分钟过期 |
+| 非阻塞输入检测 | ✅ | select.select 非阻塞 |
+| Rich 微调器 | ✅ | 复用 driver.start_thinking() |
+| 进化思考 Prompt | ✅ | 70%专注能力评估、进化方向 |
+| 趣味思考 Prompt | ✅ | 30%专注观察、关心、有意义的闲聊 |
+| 统一 WWG 入口 | ✅ | 删除了独立的 Genesis 模式 |
+
+### 12.3 核心实现
+
+**状态枚举：**
+```python
+class ThinkingState(Enum):
+    IDLE = "idle"
+    USER_THINKING = "user"
+    EVOLUTION_THINKING = "evolution"  # 70%
+    FUN_THINKING = "fun"  # 30%
+```
+
+**骰子机制：**
+```python
+def roll_dice(self) -> ThinkingState:
+    if random.random() < 0.7:
+        return ThinkingState.EVOLUTION_THINKING
+    return ThinkingState.FUN_THINKING
+```
+
+**调研内容：**
+```python
+def do_research(self) -> dict:
+    return {
+        "l2_cache": self._read_l2_cache(),
+        "persistent": self._read_persistent_memory(),
+        "lessons": self._read_lessons(),
+        "wins": self._read_wins(),
+        "system_status": self._read_system_status(),  # who、历史命令
+        "recent_history": self._read_recent_history(),
+    }
+```
+
+### 12.4 测试结果
+
+**测试模型：** 阿里 Qwen-turbo
+
+**测试输出示例（趣味思考）：**
+```
+🎲 趣味思考
+
+从系统状态和最近命令来看，用户似乎在进行某种开发或测试工作...
+这种行为模式像是在进行一场"代码马拉松"...
+或许可以提醒用户注意休息，毕竟长时间的重复操作可能会导致疲劳...
+
+虽然我没有真正的"生命"，但我希望能让用户感受到我的存在...
+```
+
+**结论：** 趣味思考效果很好，有灵性。
+
+### 12.5 待完善
+
+1. **AI 自主决定思考间隔** - 目前固定15分钟
+2. **进化思考的实际效果** - 需进一步测试
+3. **用户控制开关** - 如何开启/关闭 AI Thinking
+
+### 12.6 Commit 历史
+
+```
+7ea47ae ♻️ 重构：使用 driver.start_thinking() 替代自定义 Spinner
+74cff4a ✨ 添加 AI Thinking 动态微调器图标
+b7b0190 🎲 AI Thinking 骰子机制：70%进化 + 30%趣味
+959f1e6 ✨ WWG统一模式：Shell编排+AgentCore执行
+```
+
+---
+
+*文档版本：v0.5*
+*状态：功能实现完成，测试通过*
