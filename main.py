@@ -11,12 +11,57 @@ from pathlib import Path
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
 
+import readline
 from core.agent import AgentCore
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 
 console = Console()
+
+
+class CommandCompleter:
+    def __init__(self, config: dict):
+        self.config = config
+        self.base_commands = [
+            "help",
+            "quit",
+            "exit",
+            "退出",
+            "tools",
+            "models",
+            "switch",
+        ]
+
+    def get_model_indices(self):
+        models = self.config.get("models", [])
+        return [str(i) for i in range(len(models))]
+
+    def complete(self, text, state):
+        text = text.lower().strip()
+
+        if " " in text:
+            cmd, partial = text.split(" ", 1)
+            if cmd in ("switch", "s"):
+                matches = [
+                    idx for idx in self.get_model_indices() if idx.startswith(partial)
+                ]
+                if state < len(matches):
+                    return f"switch {matches[state]}"
+            return None
+
+        matches = [cmd for cmd in self.base_commands if cmd.startswith(text)]
+
+        if state < len(matches):
+            return matches[state]
+        return None
+
+
+def setup_readline(config: dict):
+    completer = CommandCompleter(config)
+    readline.set_completer(completer.complete)
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer_delims(" ")
 
 
 def load_config():
@@ -62,10 +107,12 @@ def list_models(config: dict) -> str:
 
 def run_wwg(agent, config: dict):
     """WWG 交互模式 — 外壳负责 UI"""
+    setup_readline(config)
     console.print(
         Panel(
             "[bold cyan]zencore[/] — 一切从简，与神同行\n"
-            "输入 [bold]quit[/] 退出 | [bold]tools[/] 查看工具 | [bold]models[/] 切换模型",
+            "[bold]quit/exit[/] 退出 | [bold]tools[/] 工具 | [bold]models[/] 模型 | [bold]switch <n>[/] 切换 | [bold]help[/] 帮助\n"
+            "[dim]按 Tab 键自动补全[/]",
             title="🕊️ Walk with God",
             border_style="green",
         )
@@ -79,7 +126,22 @@ def run_wwg(agent, config: dict):
             if user_input.lower() in ("quit", "exit", "退出"):
                 console.print("[bold yellow]👋 再见![/]")
                 break
-            if user_input.lower() == "tools":
+            if user_input.lower() in ("help", "h", "?"):
+                console.print(
+                    Panel(
+                        "[bold]可用命令:[/]\n"
+                        "  quit/exit       退出\n"
+                        "  tools           查看工具列表\n"
+                        "  models          查看模型列表\n"
+                        "  switch <n>       切换到模型 n\n"
+                        "  help            显示此帮助\n\n"
+                        "[dim]按 Tab 键自动补全[/]",
+                        title="🆘 帮助",
+                        border_style="blue",
+                    )
+                )
+                continue
+            if user_input.lower() in ("tools", "t"):
                 tools = agent.list_tools()
                 lines = [
                     f"- `{name}`: {info.get('description', '')}"

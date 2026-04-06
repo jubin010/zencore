@@ -1,28 +1,63 @@
 # memory_plugin
 
-本体记忆 — 全局、跨角色、长期有效的记忆操作
+本体记忆 — L2 缓存区（本能管理）+ 持久区（Librarian 管理）
 
-## 工具
+## 记忆层次架构
+
+| 层级 | 位置 | 管理器 | 说明 |
+|------|------|--------|------|
+| **L1 Cache** | conversation_history | AI 自动 | 当前上下文 |
+| **L2 Cache** | memory.md 的 L2 缓存区 | 本能自动 | 归档区，hits 追踪访问频率 |
+| **Disk** | memory.md 的持久区 | Librarian 手动 | 真正持久的重要记忆 |
+
+## 基础工具（读写）
 
 ### read_global_memory
-读取全局记忆。无参数。
-- 返回：完整的记忆内容（Markdown 格式）
-- 如果记忆为空，返回"（全局记忆为空）"
+读取全局记忆（包含 L2 和持久区）。无参数。
 
 ### write_global_memory
 覆盖写入全局记忆。
 - `content`（必填）：完整的全局记忆内容（Markdown 格式）
-- 注意：这是**覆盖写入**，会替换全部内容
-- 适用场景：更新用户画像、项目全局配置等需要整体更新的场景
 
 ### append_global_memory
 追加一行到全局记忆。
 - `line`（必填）：要追加的内容
-- 注意：只追加一行，不会替换已有内容
-- 适用场景：记录跨角色的长期经验、补充信息
 
-## 记忆方法论
+## L2 缓存区工具（Librarian 使用）
 
-- **write_global_memory** = 重写整本笔记
-- **append_global_memory** = 在笔记末尾加一行
-- 不确定用哪个时：如果只是补充信息，用 append；如果要重新整理，用 write
+### list_l2_cache
+列出 L2 缓存区的所有条目及其访问次数。
+- 返回：索引、日期、hits、摘要
+- **每次检索记忆都会使该条目的 hits +1（升温）**
+
+### list_persistent_memory
+列出持久记忆区的所有条目。
+
+### heat_memory
+将 L2 缓存区指定索引的条目 hits +1。
+- `index`（必填）：L2 条目索引
+- **调用时机**：当 Librarian 检索某段记忆时调用此工具，使其升温
+
+### promote_memory
+将 L2 缓存区指定索引的条目晋升到持久区（永久保存）。
+- `index`（必填）：L2 条目索引
+- **晋升标准**：hits >= 3 或 age > 7天 且 hits > 0
+
+### delete_from_l2
+从 L2 缓存区删除指定索引的条目。
+- `index`（必填）：L2 条目索引
+
+### delete_from_persistent
+从持久记忆区删除指定索引的条目。
+- `index`（必填）：持久区条目索引
+
+### write_persistent_memory
+手动写入持久记忆（由 Librarian 整理后的内容）。
+- `content`（必填）：要持久化的内容
+
+## Librarian 工作流
+
+1. `list_l2_cache` — 查看 L2 缓存条目
+2. `heat_memory(index)` — 检索某条目时调用，使其升温
+3. `promote_memory(index)` — 高频记忆晋升到持久区
+4. `delete_from_l2(index)` 或 `delete_from_persistent(index)` — 删除过时记忆

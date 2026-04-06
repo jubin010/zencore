@@ -19,6 +19,7 @@ PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
 ROLES_DIR = PLUGINS_DIR / "roles"
 GLOBAL_LESSONS = PLUGINS_DIR / "memory_plugin" / "lessons.md"
+GLOBAL_WINS = PLUGINS_DIR / "memory_plugin" / "wins.md"
 
 # 核心插件 — 永久保留
 CORE_PLUGINS = {
@@ -90,34 +91,66 @@ class ToolRegistry:
 
 
 class InstinctRegistry:
-    """本能注册表 — 智能体的潜意识驱动力"""
+    """本能注册表 — 智能体的潜意识驱动力
+
+    三层本能模型:
+    - 感觉层 (feeling): 注入 System Prompt，让 AI 感知状态
+    - 反射层 (reflex):  条件触发时自动执行，不经过 AI 决策
+    - 驱动层 (drive):   持续背景压力，驱使 AI 主动寻找解药（同感觉层）
+    """
 
     def __init__(self):
         self._instincts: list = []
 
-    def register(self, name: str, condition: Callable, prompt_func: Callable):
+    def register(
+        self,
+        name: str,
+        condition: Callable,
+        prompt_func: Callable = None,
+        reflex: Callable = None,
+    ):
         """
         注册本能
 
         Args:
             name: 本能名称
             condition: 返回 True/False 的函数，决定本能是否激活
-            prompt_func: 返回本能注入文本的函数（动态生成）
+            prompt_func: 返回本能注入文本的函数（感觉层/驱动层）
+            reflex: 条件满足时自动执行的回调函数（反射层）
         """
-        self._instincts.append(
-            {"name": name, "condition": condition, "prompt_func": prompt_func}
-        )
+        entry = {"name": name, "condition": condition}
+        if prompt_func is not None:
+            entry["prompt_func"] = prompt_func
+        if reflex is not None:
+            entry["reflex"] = reflex
+        self._instincts.append(entry)
 
     def evaluate(self) -> str:
-        """评估所有本能，返回激活的本能文本"""
+        """评估所有本能，返回激活的感觉/驱动文本"""
         lines = []
         for instinct in self._instincts:
             try:
                 if instinct["condition"]():
-                    lines.append(instinct["prompt_func"]())
+                    if "prompt_func" in instinct:
+                        lines.append(instinct["prompt_func"]())
             except:
                 pass
         return "\n".join(lines) if lines else ""
+
+    def fire_reflexes(self) -> list:
+        """触发所有满足条件的反射，返回执行结果列表"""
+        results = []
+        for instinct in self._instincts:
+            try:
+                if instinct["condition"]() and "reflex" in instinct:
+                    result = instinct["reflex"]()
+                    if result:
+                        results.append({"name": instinct["name"], "result": result})
+            except Exception as e:
+                results.append(
+                    {"name": instinct.get("name", "unknown"), "error": str(e)}
+                )
+        return results
 
 
 class AgentCore:
@@ -321,9 +354,43 @@ class AgentCore:
 
         return "\n\n".join(lines) if lines else "（暂无教训，保持警惕）"
 
+    def _load_wins(self, role: str = "") -> str:
+        """加载成功经验（全局 + 角色专属）"""
+        lines = []
+
+        if GLOBAL_WINS.exists():
+            content = GLOBAL_WINS.read_text(encoding="utf-8").strip()
+            if content and "暂无成功经验" not in content:
+                lines.append("### 全局成功经验")
+                lines.append(content)
+
+        if role:
+            role_wins = ROLES_DIR / role / "wins.md"
+            if role_wins.exists():
+                content = role_wins.read_text(encoding="utf-8").strip()
+                if content and "暂无成功经验" not in content:
+                    lines.append(f"### {role}专属成功经验")
+                    lines.append(content)
+
+        return "\n\n".join(lines) if lines else "（暂无成功经验，等待第一次胜利）"
+
+    def _load_role_memory(self) -> str:
+        """加载当前角色的记忆文件内容"""
+        if not self._current_role_memory_file:
+            return ""
+        mem_path = Path(self._current_role_memory_file)
+        if not mem_path.exists():
+            return ""
+        content = mem_path.read_text(encoding="utf-8").strip()
+        if not content or "（记忆为空）" in content:
+            return ""
+        return f"## 当前角色记忆\n\n{content}\n"
+
     def _build_prompt(self, user_message: str) -> str:
         plugins_info = self._get_plugins_info()
         lessons = self._load_lessons(self._current_role)
+        wins = self._load_wins(self._current_role)
+        role_memory = self._load_role_memory()
         instincts = self.instinct_registry.evaluate()
 
         # 当前状态上下文（供本能驱使时知道"我是谁"、"笔在哪"）
@@ -349,18 +416,26 @@ class AgentCore:
 
 {lessons}
 
+## 成功经验（复用有效路径）
+
+{wins}
+
 {instincts}
 
 ## 当前状态
 
 {current_context}
 
+{role_memory}
+
 ## 本能认知指南
 
-本能是系统注入的潜意识信号（如拥挤、挫败）。
-- **本能 = 感觉**：告诉你"哪里不舒服"。
-- **角色 = 解药**：查阅 `plugins/roles/` 下的角色说明，找到能缓解该本能的角色。
-- **行动**：切换到对应角色，利用其工具消除不适。
+本能是系统注入的潜意识信号，分三层：
+- **感觉层**（注入 Prompt）：告诉你"哪里舒服/不舒服"。
+- **反射层**（自动执行）：系统自动处理，如拥挤时自动归档、失败时自动记录教训。
+- **驱动层**（持续压力）：驱使你在对话中主动寻找解药。
+
+负反馈本能（拥挤/挫败）让你趋害，正反馈本能（顺畅）让你趋利。
 
 ## 工具使用
 
@@ -441,6 +516,7 @@ class AgentCore:
     def chat_with_tools(self, message: str) -> str:
         self.add_message("user", message)
         self._consecutive_failures = 0
+        self._consecutive_successes = 0
         total_failures = 0
         MAX_TOTAL_FAILURES = 50
 
@@ -453,6 +529,18 @@ class AgentCore:
 
             if total_failures >= MAX_TOTAL_FAILURES:
                 return f"❌ 已达到最大尝试次数 ({MAX_TOTAL_FAILURES})。我可能陷入了死循环，请人类协助。"
+
+            # 触发反射层本能（自动执行，不经过 AI）
+            reflex_results = self.instinct_registry.fire_reflexes()
+            for reflex in reflex_results:
+                if "result" in reflex:
+                    self.add_message(
+                        "system", f"[反射执行] {reflex['name']}: {reflex['result']}"
+                    )
+                elif "error" in reflex:
+                    self.add_message(
+                        "system", f"[反射异常] {reflex['name']}: {reflex['error']}"
+                    )
 
             # 构建完整消息
             sys_prompt = json.loads(self._build_prompt(""))[0]["content"]
@@ -499,8 +587,10 @@ class AgentCore:
                 if tool_result.startswith("❌ [ERROR]"):
                     self._consecutive_failures += 1
                     total_failures += 1
+                    self._consecutive_successes = 0
                 else:
                     self._consecutive_failures = 0
+                    self._consecutive_successes += 1
 
                 self.add_message("tool", content=tool_result, tool_call_id=tool_id)
 
