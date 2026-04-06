@@ -457,6 +457,14 @@ def run_wwg(agent, config: dict):
         try:
             # ========== 检查是否该 AI Thinking ==========
             if thinking_mgr.has_user_interacted and thinking_mgr.should_think():
+                console.print(
+                    Panel(
+                        "[dim]⏰ 沉默超时，AI 即将开始思考...[/dim]\n"
+                        "[dim]输入内容即可打断[/dim]",
+                        title="💡 系统",
+                        border_style="yellow",
+                    )
+                )
                 thinking_mgr.transition_to_ai_thinking()
 
                 if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
