@@ -9,6 +9,7 @@ import time
 import select
 import subprocess
 import random
+import os
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -623,11 +624,28 @@ def run_wwg(agent, config: dict):
                     thinking_mgr.transition_to_idle()
                     continue
 
-            # ========== 非阻塞检测用户输入 ==========
-            if select.select([sys.stdin], [], [], 0.5)[0]:
-                user_input = input("\n👤 你: ").strip()
-                if user_input:
-                    thinking_mgr.set_user_input(user_input)
+            # ========== 简化的输入检测 ==========
+            try:
+                import termios
+                import tty
+                import fcntl
+
+                fd = sys.stdin.fileno()
+                old_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, old_flags | os.O_NONBLOCK)
+
+                try:
+                    ch = sys.stdin.read(1)
+                    if ch:
+                        # 有输入，恢复设置并读取
+                        fcntl.fcntl(fd, fcntl.F_SETFL, old_flags)
+                        user_input = input("\n👤 你: ").strip()
+                        if user_input:
+                            thinking_mgr.set_user_input(user_input)
+                except:
+                    fcntl.fcntl(fd, fcntl.F_SETFL, old_flags)
+            except:
+                pass
 
         except KeyboardInterrupt:
             console.print("\n[bold yellow]👋 再见![/]")
