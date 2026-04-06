@@ -20,8 +20,14 @@ console = Console()
 
 
 def _sanitize(text: str) -> str:
-    """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates U+D800-U+DFFF)"""
-    return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
+    """净化文本：移除 UTF-8 不支持的代理字符"""
+    if not text:
+        return ""
+    # 移除 surrogate 字符
+    text = re.sub(r"[\ud800-\udfff]", "", text)
+    # 移除其他非法字符
+    text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+    return text
 
 
 def _parse_ollama_thinking_toolcalls(thinking: str) -> list:
