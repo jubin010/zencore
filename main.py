@@ -436,8 +436,8 @@ def run_wwg(agent, config: dict):
 
     thinking_mgr = AIThinkingManager(agent, config)
     thinking_mgr.do_research()
-    # 程序启动时就设置沉默计时器
-    thinking_mgr.next_think_time = time.time() + thinking_mgr.think_interval_min * 60
+    # 启动时不设置 next_think_time，让第一次思考立即触发
+    # next_think_time = None 表示"还没思考过"
     setup_readline(config)
 
     console.print(
