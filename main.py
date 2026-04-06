@@ -466,11 +466,6 @@ def run_wwg(agent, config: dict):
 
     import select
 
-    last_input_time = [time.time()]
-
-    def reset_timer():
-        last_input_time[0] = time.time()
-
     while True:
         try:
             # 用 select 检测输入，超时则触发思考
@@ -479,7 +474,6 @@ def run_wwg(agent, config: dict):
 
             if not ready:
                 # 超时，触发思考
-                thinking_flag[0] = True
                 thinking_mgr.transition_to_ai_thinking()
 
                 if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
@@ -500,7 +494,6 @@ def run_wwg(agent, config: dict):
                         border_style="cyan",
                     )
                 )
-                reset_timer()
 
                 response = agent.chat_with_tools(thinking_prompt)
                 if response:
@@ -513,7 +506,6 @@ def run_wwg(agent, config: dict):
                     )
 
                 thinking_mgr.transition_to_idle()
-                thinking_flag[0] = False
                 continue
 
             # 有输入，读取并处理
@@ -524,8 +516,6 @@ def run_wwg(agent, config: dict):
                 break
 
             if user_input:
-                reset_timer()
-
                 # 处理用户输入
                 if user_input.lower() in ("quit", "exit", "退出"):
                     console.print("[bold yellow]👋 再见![/]")
