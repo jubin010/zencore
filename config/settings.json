@@ -1,5 +1,5 @@
 {
-  "active_model": 0,
+  "active_model": 1,
   "models": [
     {
       "name": "本地 Ollama",

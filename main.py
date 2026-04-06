@@ -9,7 +9,6 @@ import time
 import select
 import subprocess
 import random
-import threading
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -24,39 +23,6 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 console = Console()
-
-
-class Spinner:
-    """简单的终端微调器"""
-
-    FRAMES = ["◐", "◓", "◑", "◒"]
-
-    def __init__(self, message: str = "思考中"):
-        self.message = message
-        self.running = False
-        self.thread = None
-
-    def _spin(self):
-        idx = 0
-        while self.running:
-            sys.stdout.write(
-                f"\r{self.FRAMES[idx % len(self.FRAMES)]} {self.message}..."
-            )
-            sys.stdout.flush()
-            time.sleep(0.3)
-            idx += 1
-        sys.stdout.write("\r" + " " * (len(self.message) + 10) + "\r")
-        sys.stdout.flush()
-
-    def start(self):
-        self.running = True
-        self.thread = threading.Thread(target=self._spin, daemon=True)
-        self.thread.start()
-
-    def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=1)
 
 
 # ========== AI Thinking 状态机 ==========
@@ -632,10 +598,11 @@ def run_wwg(agent, config: dict):
                         )
                     )
 
-                    spinner = Spinner(f"{title} 执行中")
-                    spinner.start()
-                    response = agent.chat_with_tools(thinking_prompt)
-                    spinner.stop()
+                    agent.driver.start_thinking()
+                    try:
+                        response = agent.chat_with_tools(thinking_prompt)
+                    finally:
+                        agent.driver.stop_thinking()
 
                     # 输出思考结果
                     if response:
