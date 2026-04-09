@@ -177,6 +177,9 @@ def register(agent):
         msg += plugins_info
         msg += "\n\n💡 提示：本能信息（教训、成功经验）会自动注入，无需角色记忆时请切换回无角色状态。"
 
+        # 返回角色描述供 AgentCore 注入系统提示词
+        agent._current_role_description = role_desc
+
         return msg
 
     def _persist_role_working_memory(agent):
@@ -272,9 +275,71 @@ def register(agent):
         },
     )
 
+    # 角色切换指南本能
+    def role_guide_condition():
+        return True
+
+    def role_guide_prompt():
+        return """## 专家角色
+
+遇到以下情况时，考虑切换到专家角色：
+- 用户问题涉及特定领域（编程、写作、分析等）
+- 需要该领域的专业方法论
+- 需要专注完成某个特定任务
+
+**主角色永远存在**：小明（热情友好）是你的根基，专家角色只是工作需要
+
+**角色层级**：
+- **主角色**（根基）：名字、性格、与用户的情感连接
+- **专家角色**（临时）：工作方法论、专业知识、完成任务后切回
+
+**用法**：
+1. `list_roles()` - 查看可用专家
+2. `switch_role(role_name="xxx")` - 切换到对应专家
+3. 完成任务后可切回"无角色"或"主角色"
+
+当前角色由 `switch_role` 管理，切换后会加载对应角色记忆。"""
+
+    agent.instinct_registry.register(
+        "role_guide", role_guide_condition, role_guide_prompt
+    )
+
+    # 创建角色指南本能
+    def role_creation_guide_condition():
+        return True
+
+    def role_creation_guide_prompt():
+        return """## 创建角色时机
+
+遇到以下情况时，可以考虑创建新角色：
+- **反复解决同类问题**：把经验固化为角色
+- **需要特定记忆**：存储用户偏好或任务上下文
+- **现有角色不够用**：按需创建
+
+**判断流程**：遇到问题 → list_roles() 查看现有角色 → 现有角色无法高效解决？→ create_role()
+
+**创建原则**：
+- 角色名要有意义，AI 能推断用途
+- role_md 要简洁，描述身份和职责
+- 一个角色解决一类问题，不要贪多
+
+**用法**：
+```
+create_role(
+    role_name="xxx",      # 简洁有力的名字
+    role_md="xxx",        # 一句话描述身份
+    plugins_json="[]",    # 该角色需要的插件（可选）
+    memory_md=""          # 初始记忆（可选）
+)
+```"""
+
+    agent.instinct_registry.register(
+        "role_creation_guide", role_creation_guide_condition, role_creation_guide_prompt
+    )
+
     return {
         "name": "role_plugin",
-        "version": "2.0.0",
+        "version": "2.2.0",
         "author": "AgentCore",
         "description": "角色 — 按需聘请的专家（切换时加载记忆，离开时释放）",
         "tools": ["list_roles", "get_role_info", "create_role", "switch_role"],

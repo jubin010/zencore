@@ -2,26 +2,37 @@
 """
 zencore 主入口
 WWG 统一模式：User Thinking + AI Thinking（Shell 编排 + AgentCore 执行）
+TUI 聊天系统：Human 和 AI 作为两个客户端，通过 Server 通信
 """
 
 import sys
 import time
 import subprocess
 import random
-import queue
 import threading
+import queue
+import re
+import json
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
 
+from rich.markdown import Markdown
+from rich.console import Console
+from rich.text import Text
+from rich.panel import Panel
+from rich import box as box_type
+from textual.app import App, ComposeResult
+from textual.widgets import RichLog, Static
+from textual.widgets._text_area import TextArea
+from textual.containers import Vertical
+from textual.message import Message
+from textual import events
+
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
 
-import readline
 from core.agent import AgentCore
-from rich.console import Console
-from rich.panel import Panel
-from rich.markdown import Markdown
 
 console = Console()
 
@@ -30,23 +41,81 @@ def sanitize(text: str) -> str:
     """净化文本：移除 UTF-8 不支持的代理字符"""
     if not text:
         return ""
-    import re
-
-    # 移除 surrogate 字符
     text = re.sub(r"[\ud800-\udfff]", "", text)
-    # 移除其他非法字符
     text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
     return text
+
+
+# ========== 配置工具函数 ==========
+
+
+def get_active_model(config: dict) -> dict:
+    models = config.get("models", [])
+    if not models:
+        return {
+            "name": "默认模型",
+            "host": "http://localhost:11434",
+            "model": "qwen3.5:9b",
+            "api_key": "ollama",
+            "thinking": False,
+        }
+    active_idx = config.get("active_model", 0)
+    if 0 <= active_idx < len(models):
+        return models[active_idx]
+    return models[0]
+
+
+def list_models(config: dict):
+    models = config.get("models", [])
+    if not models:
+        return [Text("📭 暂无配置的模型", style="dim")]
+
+    active_idx = config.get("active_model", 0)
+    lines = []
+    for i, m in enumerate(models):
+        name = m.get("name", f"模型 {i}")
+        model = m.get("model", "?")
+        thinking = "🧠" if m.get("thinking") else "  "
+        is_active = i == active_idx
+
+        if is_active:
+            line = Text.from_markup(
+                f"[cyan]▶[/cyan] [bold cyan][{i}][/bold cyan] {thinking} [white]{name}[/white] ([dim]{model}[/dim])"
+            )
+        else:
+            line = Text.from_markup(
+                f"  [dim][{i}][/dim] {thinking} [dim]{name}[/dim] ([dim]{model}[/dim])"
+            )
+        lines.append(line)
+
+    content = Text("\n").join(lines)
+    return [
+        Panel(
+            content,
+            title="🔌 模型列表",
+            border_style="cyan",
+            box=box_type.ROUNDED,
+            padding=0,
+        )
+    ]
+
+
+def load_config():
+    config_file = AGENT_CORE_DIR / "config" / "settings.json"
+    if config_file.exists():
+        with open(config_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 
 # ========== AI Thinking 状态机 ==========
 
 
 class ThinkingState(Enum):
-    IDLE = "idle"  # 等待
-    USER_THINKING = "user"  # 响应用户（不可打断）
-    EVOLUTION_THINKING = "evolution"  # 进化思考（70%）
-    FUN_THINKING = "fun"  # 趣味思考（30%）
+    IDLE = "idle"
+    USER_THINKING = "user"
+    EVOLUTION_THINKING = "evolution"
+    FUN_THINKING = "fun"
 
 
 class AIThinkingManager:
@@ -55,27 +124,14 @@ class AIThinkingManager:
     def __init__(self, agent, config):
         self.agent = agent
         self.config = config
-
-        # 状态
         self.state = ThinkingState.IDLE
-
-        # 思考控制
-        self.next_think_time = None  # 下次 AI Thinking 的触发时间
-        self.think_interval_min = 1  # 保底 1 分钟（测试用）
-
-        # 调研控制
+        self.think_interval_min = 1
         self.research_data = None
         self.research_timestamp = None
         self.remaining_thinks = 3
-        self.max_research_age = 60  # 调研结果最多撑 60 分钟
-
-        # 用户输入缓冲
-        self.pending_thinking_input = None  # 思考被打断时的用户输入
-
-    # ========== 调研机制 ==========
+        self.max_research_age = 60
 
     def do_research(self) -> dict:
-        """执行调研，收集思考所需的信息"""
         research = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "l2_cache": self._read_l2_cache(),
@@ -91,12 +147,10 @@ class AIThinkingManager:
         return research
 
     def _read_l2_cache(self) -> str:
-        """读取 L2 缓存区"""
         mem_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "memory.md"
         if not mem_file.exists():
             return "(L2 缓存为空)"
         content = mem_file.read_text(encoding="utf-8")
-        # 提取 L2 缓存区内容
         marker = "<!-- L2 -->"
         if marker in content:
             start = content.find(marker) + len(marker)
@@ -107,7 +161,6 @@ class AIThinkingManager:
         return "(L2 缓存为空)"
 
     def _read_persistent_memory(self) -> str:
-        """读取持久记忆区"""
         mem_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "memory.md"
         if not mem_file.exists():
             return "(持久记忆为空)"
@@ -119,7 +172,6 @@ class AIThinkingManager:
         return "(持久记忆为空)"
 
     def _read_lessons(self) -> str:
-        """读取教训"""
         lessons_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "lessons.md"
         if lessons_file.exists():
             content = lessons_file.read_text(encoding="utf-8").strip()
@@ -128,7 +180,6 @@ class AIThinkingManager:
         return "(暂无教训)"
 
     def _read_wins(self) -> str:
-        """读取成功经验"""
         wins_file = AGENT_CORE_DIR / "plugins" / "memory_plugin" / "wins.md"
         if wins_file.exists():
             content = wins_file.read_text(encoding="utf-8").strip()
@@ -137,15 +188,11 @@ class AIThinkingManager:
         return "(暂无成功经验)"
 
     def _read_system_status(self) -> str:
-        """读取系统状态"""
         try:
-            # 用户登录信息
             who_result = subprocess.run(
                 ["who"], capture_output=True, text=True, timeout=2
             )
-            # 当前时间
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # bash history 最近命令
             history_file = Path.home() / ".bash_history"
             recent_cmds = ""
             if history_file.exists():
@@ -162,7 +209,6 @@ class AIThinkingManager:
             return f"(无法读取系统状态: {e})"
 
     def _read_recent_history(self) -> str:
-        """读取最近的对话历史"""
         history = (
             self.agent.conversation_history[-10:]
             if self.agent.conversation_history
@@ -178,16 +224,12 @@ class AIThinkingManager:
                 lines.append(f"- {role}: {content}...")
         return "\n".join(lines) if lines else "(无对话历史)"
 
-    # ========== 思考 Prompt 构建 ==========
-
     def roll_dice(self) -> ThinkingState:
-        """投掷骰子，决定思考类型"""
         if random.random() < 0.7:
             return ThinkingState.EVOLUTION_THINKING
         return ThinkingState.FUN_THINKING
 
     def build_evolution_prompt(self, research: dict) -> str:
-        """构建进化思考的 Prompt"""
         prompt = f"""## 进化思考模式
 
 你不是在响应用户，而是在进行**自主思考**。
@@ -245,7 +287,6 @@ class AIThinkingManager:
         return prompt
 
     def build_fun_prompt(self, research: dict) -> str:
-        """构建趣味思考的 Prompt"""
         prompt = f"""## 趣味思考模式
 
 你不是在响应用户，而是在进行**自主思考**。
@@ -303,369 +344,502 @@ class AIThinkingManager:
 现在开始你的趣味思考："""
         return prompt
 
-    # ========== 思考触发判断 ==========
-
     def should_research(self) -> bool:
-        """判断是否需要重新调研"""
         now = time.time()
-
-        # 首次必须调研
         if self.research_data is None:
             return True
-
-        # 思考次数用尽
         if self.remaining_thinks <= 0:
             return True
-
-        # 调研过期
         if now - self.research_timestamp > self.max_research_age * 60:
             return True
-
         return False
 
-    def should_think(self) -> bool:
-        """判断是否该触发 AI Thinking"""
-        if self.state != ThinkingState.IDLE:
-            return False
-
-        # 检查是否到了思考时间
-        if self.next_think_time is None:
-            # 第一次：设置计时器，等待 interval
-            self.next_think_time = time.time() + self.think_interval_min * 60
-            return False
-
-        return time.time() >= self.next_think_time
-
-    def calculate_next_think_time(self) -> int:
-        """AI 自主决定下次思考间隔（分钟）"""
-        return self.think_interval_min  # 测试用 1 分钟
-
-    # ========== 状态转换 ==========
-
     def transition_to_ai_thinking(self):
-        """转换到 AI Thinking 状态（投骰子决定）"""
         self.state = self.roll_dice()
 
     def transition_to_idle(self):
-        """转换到 IDLE 状态"""
         self.state = ThinkingState.IDLE
-        # 如果需要调研，先调研
         if self.should_research():
             self.do_research()
-
-        # 设置下次思考时间
-        interval = self.calculate_next_think_time()
-        self.next_think_time = time.time() + interval * 60
-
-        # 思考次数减少
         if self.remaining_thinks > 0:
             self.remaining_thinks -= 1
 
 
-class CommandCompleter:
-    def __init__(self, config: dict):
-        self.config = config
-        self.base_commands = [
-            "help",
-            "quit",
-            "exit",
-            "退出",
-            "tools",
-            "models",
-            "switch",
-        ]
+# ========== TUI 聊天系统 ==========
 
-    def get_model_indices(self):
-        models = self.config.get("models", [])
-        return [str(i) for i in range(len(models))]
 
-    def complete(self, text, state):
-        text = text.lower().strip()
+class Server:
+    """消息服务器：简单的队列广播"""
 
-        if " " in text:
-            cmd, partial = text.split(" ", 1)
-            if cmd in ("switch", "s"):
-                matches = [
-                    idx for idx in self.get_model_indices() if idx.startswith(partial)
-                ]
-                if state < len(matches):
-                    return f"switch {matches[state]}"
+    def __init__(self):
+        self.human_queue = queue.Queue()
+        self.ai_queue = queue.Queue()
+        self.running = False
+        self.thinking_enabled = False
+
+    def start(self):
+        self.running = True
+
+    def stop(self):
+        self.running = False
+
+    def human_send(self, msg: str):
+        if self.running:
+            self.ai_queue.put(("human", msg))
+
+    def ai_send(self, msg: str):
+        if self.running:
+            self.human_queue.put(("ai", msg))
+
+    def ai_recv(self, timeout=0.1):
+        try:
+            return self.ai_queue.get(timeout=timeout)
+        except queue.Empty:
             return None
 
-        matches = [cmd for cmd in self.base_commands if cmd.startswith(text)]
 
-        if state < len(matches):
-            return matches[state]
-        return None
+class SendTextArea(TextArea):
+    """TextArea 子类：Enter 发送，Ctrl+J 换行，右箭头命令补全"""
+
+    COMMANDS = ["/list", "/select", "/clear", "/quit", "/render", "/thinking"]
+
+    def __init__(self, **kwargs):
+        self._completion_idx = -1
+        self._completion_matches = []
+        self._completion_prefix = ""
+        super().__init__(**kwargs)
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "ctrl+j":
+            event.prevent_default()
+            event.stop()
+            cursor = self.cursor_location
+            self.replace("\n", cursor, cursor)
+            return
+
+        if event.key == "right":
+            self._do_complete()
+            return
+
+        if event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            text = self.text.strip()
+            if text:
+                self.text = ""
+                self.post_message(self._Submit(text))
+            return
+
+        await super()._on_key(event)
+
+    def _do_complete(self):
+        row, _ = self.cursor_location
+        line_start = self.get_cursor_line_start_location()
+        line_end = self.get_cursor_line_end_location()
+        prefix = str(self.get_line(row))
+
+        if not prefix.strip().startswith("/"):
+            return
+
+        if prefix.strip() != self._completion_prefix:
+            self._completion_prefix = prefix.strip()
+            self._completion_matches = [
+                c for c in self.COMMANDS if c.startswith(prefix.strip())
+            ]
+            self._completion_idx = 0
+        elif self._completion_matches:
+            self._completion_idx = (self._completion_idx + 1) % len(
+                self._completion_matches
+            )
+
+        if not self._completion_matches:
+            return
+
+        completed = self._completion_matches[self._completion_idx]
+        self.replace(completed, line_start, line_end)
+
+    class _Submit(Message):
+        def __init__(self, text: str):
+            super().__init__()
+            self.text = text
 
 
-def setup_readline(config: dict):
-    completer = CommandCompleter(config)
-    readline.set_completer(completer.complete)
-    readline.parse_and_bind("tab: complete")
-    readline.set_completer_delims(" ")
+class ChatUI(App):
+    CSS = """
+    Screen {
+        background: #000000;
+    }
+    #header {
+        height: 5;
+        margin: 0 1;
+        background: #000000;
+        border: solid #ffffff;
+    }
+    #messages {
+        height: 1fr;
+        margin: 0 1;
+        background: #000000;
+    }
+    #messages Vertical {
+        height: 100%;
+    }
+    #msg-log {
+        height: 100%;
+        background: #000000;
+        border: solid #ffffff;
+        scrollbar-color: #ffffff #000000;
+        scrollbar-background: #000000;
+    }
+    #msg-log:focus {
+        background: #000000;
+    }
+    #msg-text {
+        height: 100%;
+        background: #000000;
+        border: solid #ffffff;
+    }
+    #msg-text TextArea {
+        color: #ffffff;
+        background: #000000;
+        scrollbar-color: #ffffff #000000;
+        scrollbar-background: #000000;
+    }
+    #input-box {
+        height: 6;
+        margin: 0 1;
+        border: solid #ffffff;
+        background: #000000;
+    }
+    #input-box SendTextArea {
+        color: #ffffff;
+    }
+    Static {
+        color: #aaaaaa;
+    }
+    """
 
+    def __init__(
+        self,
+        server: Server,
+        initial_messages: list = None,
+        config: dict = None,
+        agent=None,
+        plugin_lines: list = None,
+    ):
+        super().__init__()
+        self.server = server
+        self.initial_messages = initial_messages or []
+        self.config = config or {}
+        self.agent = agent
+        self.plugin_lines = plugin_lines or []
+        self._render_mode = True
+        self._thinking_enabled = server.thinking_enabled
+        self._plain_messages = []
+        self._msg_log = None
 
-def load_config():
-    config_file = AGENT_CORE_DIR / "config" / "settings.json"
-    if config_file.exists():
-        import json
-
-        with open(config_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def get_active_model(config: dict) -> dict:
-    models = config.get("models", [])
-    if not models:
-        return {
-            "name": "默认模型",
-            "host": "http://localhost:11434",
-            "model": "qwen3.5:9b",
-            "api_key": "ollama",
-            "thinking": False,
-        }
-    active_idx = config.get("active_model", 0)
-    if 0 <= active_idx < len(models):
-        return models[active_idx]
-    return models[0]
-
-
-def list_models(config: dict) -> str:
-    models = config.get("models", [])
-    if not models:
-        return "📭 暂无配置的模型"
-    active_idx = config.get("active_model", 0)
-    lines = ["🔌 可用模型列表", "=" * 40]
-    for i, m in enumerate(models):
-        marker = "▶" if i == active_idx else " "
-        name = m.get("name", f"模型 {i}")
-        model = m.get("model", "?")
-        thinking = "🧠" if m.get("thinking") else "  "
-        lines.append(f"  {marker} [{i}] {thinking} {name} ({model})")
-    return "\n".join(lines)
-
-
-def run_wwg(agent, config: dict):
-    """WWG 统一模式 — Shell 编排 + AgentCore 执行"""
-
-    thinking_mgr = AIThinkingManager(agent, config)
-    thinking_mgr.do_research()
-    setup_readline(config)
-
-    console.print(
-        Panel(
-            "[bold cyan]zencore[/] — 一切从简，与神同行\n"
-            "[bold]quit/exit[/] 退出 | [bold]tools[/] 工具 | [bold]models[/] 模型 | [bold]switch <n>[/] 切换 | [bold]help[/] 帮助\n"
-            "[dim]按 Tab 键自动补全[/] | [dim]沉默时 AI 会自主思考[/]",
-            title="🕊️ Walk with God",
-            border_style="green",
+    def compose(self) -> ComposeResult:
+        yield Static("\n".join(self.initial_messages), id="header")
+        yield Vertical(
+            RichLog(id="msg-log"),
+            TextArea(id="msg-text", read_only=True, show_line_numbers=False),
+            id="messages",
         )
-    )
+        yield SendTextArea(id="input-box", show_line_numbers=False)
 
-    import signal
+    def on_mount(self):
+        self._msg_log = self.query_one("#msg-log", RichLog)
+        msg_text = self.query_one("#msg-text", TextArea)
+        msg_text.display = False
+        for line in self.plugin_lines:
+            self._msg_log.write(line + "\n")
+        self.query_one("#input-box", SendTextArea).focus()
+        self.set_interval(0.1, self._poll_ai_messages)
 
-    last_input_time = time.time()
-    thinking_interval = thinking_mgr.think_interval_min * 60
+    def _format_time(self):
+        return datetime.now().strftime("%H:%M")
 
-    def alarm_handler(signum, frame):
-        raise TimeoutError()
+    def _format_msg(self, role: str, content: str):
+        icon = "🤖" if role == "AI" else "👤"
+        timestamp = self._format_time()
+        color = "cyan" if role == "AI" else "red"
+        border_color = "cyan" if role == "AI" else "red"
+        title = Text.from_markup(f"[{color}]{icon} {role} [dim]{timestamp}[/dim]")
+        panel = Panel(
+            Markdown(content),
+            title=title,
+            border_style=border_color,
+            box=box_type.ROUNDED,
+            padding=(0, 1),
+        )
+        return panel
 
-    signal.signal(signal.SIGALRM, alarm_handler)
+    def _format_system(self, content: str) -> Text:
+        return Text("🔊 " + content + "\n", style="dim")
 
-    while True:
-        try:
-            # 设置闹钟，超时触发思考
-            signal.alarm(int(thinking_interval))
-
-            # 等待用户输入（阻塞，保持 readline 补全）
+    def _poll_ai_messages(self):
+        while True:
             try:
-                user_input = input("\n👤 你: ").strip()
-            except EOFError:
-                console.print("\n[bold yellow]👋 再见![/]")
+                msg = self.server.human_queue.get_nowait()
+                _, content = msg
+                self._plain_messages.append(f"[{self._format_time()}] AI: {content}")
+                if self._render_mode and self._msg_log:
+                    self._msg_log.write(self._format_msg("AI", content))
+            except queue.Empty:
                 break
-            except TimeoutError:
-                # 超时，触发思考
-                signal.alarm(0)  # 取消闹钟
 
-                thinking_mgr.transition_to_ai_thinking()
+    def on_send_text_area__submit(self, event: SendTextArea._Submit):
+        self._submit(event.text)
 
-                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                    thinking_prompt = thinking_mgr.build_evolution_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🧬 进化思考"
-                else:
-                    thinking_prompt = thinking_mgr.build_fun_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🎲 趣味思考"
+    def _submit(self, text: str):
+        if not text.strip():
+            return
+        msg_log = self.query_one("#msg-log", RichLog)
+        if text.startswith("/"):
+            self._handle_command(text, msg_log)
+        else:
+            self._plain_messages.append(f"[{self._format_time()}] You: {text}")
+            msg_log.write(self._format_msg("You", text))
+            self.server.human_send(text)
 
-                console.print(
-                    Panel(
-                        f"[dim]💭 AI 正在思考，请稍候...[/]",
-                        title=title,
-                        border_style="cyan",
-                    )
+    def _handle_command(self, cmd: str, msg_log: RichLog):
+        parts = cmd.split(maxsplit=1)
+        command = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if command == "/quit":
+            msg_log.write(self._format_system("退出中..."))
+            self.server.stop()
+            self.exit()
+        elif command == "/list":
+            items = list_models(self.config)
+            for item in items:
+                msg_log.write(item)
+        elif command == "/select":
+            if not arg.isdigit():
+                msg_log.write(self._format_system("用法: /select <模型编号>"))
+                return
+            idx = int(arg)
+            models = self.config.get("models", [])
+            if idx < 0 or idx >= len(models):
+                msg_log.write(
+                    self._format_system(f"无效编号，有效范围: 0-{len(models) - 1}")
                 )
+                return
+            self.config["active_model"] = idx
+            model_config = get_active_model(self.config)
+            self.agent.driver.switch_model(model_config)
+            msg_log.write(self._format_system(f"已切换到: {model_config['model']}"))
+            self._update_header(model_config)
+        elif command == "/clear":
+            msg_log.clear()
+            self._plain_messages.clear()
+        elif command == "/render":
+            self._toggle_render_mode()
+        elif command == "/thinking":
+            self._thinking_enabled = not self._thinking_enabled
+            self.server.thinking_enabled = self._thinking_enabled
+            status = "开启" if self._thinking_enabled else "关闭"
+            msg_log.write(self._format_system(f"AI 自主思考: {status}"))
+            self._update_header()
+        else:
+            msg_log.write(self._format_system(f"未知命令: {command}"))
 
-                response = agent.chat_with_tools(thinking_prompt)
-                if response:
-                    console.print(
-                        Panel(
-                            Markdown(sanitize(response)),
-                            title=title,
-                            border_style="cyan",
-                        )
-                    )
+    def on_click(self, event: events.Click):
+        if event.widget and event.widget.id in ("msg-log", "msg-text", "messages"):
+            self._toggle_render_mode()
 
-                thinking_mgr.transition_to_idle()
-                last_input_time = time.time()
-                continue
+    def on_mouse_up(self, event: events.MouseUp):
+        if not self._render_mode:
+            msg_text = self.query_one("#msg-text", TextArea)
+            selected = msg_text.selected_text
+            if selected:
+                self.app.copy_to_clipboard(selected)
 
-            if user_input:
-                last_input_time = time.time()
+    def _toggle_render_mode(self):
+        msg_log = self.query_one("#msg-log", RichLog)
+        msg_text = self.query_one("#msg-text", TextArea)
 
-                # 处理用户输入
-                if user_input.lower() in ("quit", "exit", "退出"):
-                    console.print("[bold yellow]👋 再见![/]")
-                    break
+        if self._render_mode:
+            msg_log.display = False
+            msg_text.display = True
+            msg_text.text = "\n".join(self._plain_messages)
+            ai_thinking = "✅" if self._thinking_enabled else "❌"
+            self.query_one("#header", Static).update(
+                f"🕊️ WWG Mode [COPY模式] {ai_thinking}AI自主思考\n"
+                "📋 /list /select <id> /clear /render /thinking /quit"
+            )
+        else:
+            msg_text.display = False
+            msg_log.display = True
+            self._update_header()
 
-                if user_input.lower() in ("help", "h", "?"):
-                    console.print(
-                        Panel(
-                            "[bold]可用命令:[/]\n"
-                            "  quit/exit       退出\n"
-                            "  tools           查看工具列表\n"
-                            "  models          查看模型列表\n"
-                            "  switch <n>      切换到模型 n\n"
-                            "  help            显示此帮助",
-                            title="🆘 帮助",
-                            border_style="blue",
-                        )
-                    )
-                    continue
+        self._render_mode = not self._render_mode
 
-                if user_input.lower() in ("tools",):
-                    tools = agent.list_tools()
-                    lines = [
-                        f"- `{name}`: {info.get('description', '')}"
-                        for name, info in sorted(tools.items())
-                    ]
-                    console.print(
-                        Panel(
-                            "\n".join(lines),
-                            title=f"🛠️ 可用工具 ({len(tools)}个)",
-                            border_style="blue",
-                        )
-                    )
-                    continue
+    def _update_header(self, model_config=None):
+        if model_config is None:
+            model_config = self.agent.driver.model_config if self.agent.driver else {}
+        thinking_icon = " 🧠" if model_config.get("thinking") else ""
+        ai_thinking = "✅" if self._thinking_enabled else "❌"
+        self.query_one("#header", Static).update(
+            "🕊️ WWG Mode\n"
+            f"🤖 当前模型: {model_config.get('model', 'unknown')}{thinking_icon} {ai_thinking}AI自主思考\n"
+            "📋 /list /select <id> /clear /render /thinking /quit"
+        )
 
-                if user_input.lower() == "models":
-                    models = config.get("models", [])
-                    active_idx = config.get("active_model", 0)
-                    lines = []
-                    for i, m in enumerate(models):
-                        marker = "▶" if i == active_idx else " "
-                        name = m.get("name", f"模型 {i}")
-                        model = m.get("model", "?")
-                        thinking = " 🧠" if m.get("thinking") else ""
-                        lines.append(f"{marker} [{i}] {name} (`{model}`){thinking}")
-                    console.print(
-                        Panel(
-                            "\n".join(lines),
-                            title="🔌 可用模型",
-                            border_style="yellow",
-                        )
-                    )
-                    continue
 
-                if user_input.lower().startswith("switch "):
-                    try:
-                        idx = int(user_input.split()[1])
-                        models = config.get("models", [])
-                        if 0 <= idx < len(models):
-                            config["active_model"] = idx
-                            agent.driver.switch_model(models[idx])
-                            console.print(
-                                f"[bold green]✅ 已切换到: {agent.driver.name} (`{agent.driver.model}`)[/]"
-                            )
-                        else:
-                            console.print(
-                                f"[bold red]❌ 索引超出范围 (0-{len(models) - 1})[/]"
-                            )
-                    except (ValueError, IndexError):
-                        console.print("[bold red]❌ 用法: switch <索引>[/]")
-                    continue
+class HumanClient:
+    def __init__(
+        self,
+        server: Server,
+        initial_messages: list = None,
+        config: dict = None,
+        agent=None,
+        plugin_lines: list = None,
+    ):
+        self.server = server
+        self.app = ChatUI(server, initial_messages, config, agent, plugin_lines)
 
-                # 普通对话
-                console.print()
-                response = agent.chat_with_tools(user_input)
-                console.print(
-                    Panel(
-                        Markdown(sanitize(response)), title="🤖 AI", border_style="cyan"
-                    )
-                )
-                # 超时，执行 AI 思考
-                thinking_mgr.transition_to_ai_thinking()
+    def run(self):
+        self.app.run()
 
-                if thinking_mgr.state == ThinkingState.EVOLUTION_THINKING:
-                    thinking_prompt = thinking_mgr.build_evolution_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🧬 进化思考"
-                else:
-                    thinking_prompt = thinking_mgr.build_fun_prompt(
-                        thinking_mgr.research_data
-                    )
-                    title = "🎲 趣味思考"
 
-                console.print(
-                    Panel(
-                        f"[dim]💭 AI 正在思考，请稍候...[/]",
-                        title=title,
-                        border_style="cyan",
-                    )
-                )
+class AIClient:
+    def __init__(self, server: Server, agent, thinking_mgr=None):
+        self.server = server
+        self.agent = agent
+        self.thinking_mgr = thinking_mgr
+        self.thinking_interval = 60
+        self.last_input_time = time.time()
 
-                response = agent.chat_with_tools(thinking_prompt)
+    def sanitize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = re.sub(r"[\ud800-\udfff]", "", text)
+        text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+        return text
 
-                if response:
-                    console.print(
-                        Panel(
-                            Markdown(sanitize(response)),
-                            title=title,
-                            border_style="cyan",
-                        )
-                    )
+    def handle_message(self, role: str, content: str):
+        try:
+            self.agent.driver._silent = True
+            response = self.agent.chat_with_tools(content)
+            reply = self.sanitize(response) if response else "(无响应)"
+            self.server.ai_send(reply)
 
-                thinking_mgr.transition_to_idle()
-
-        except KeyboardInterrupt:
-            console.print("\n[bold yellow]👋 再见![/]")
-            break
+            if self.thinking_mgr:
+                self.thinking_mgr.transition_to_idle()
+            self.last_input_time = time.time()
         except Exception as e:
-            console.print(f"\n[bold red]❌ 错误: {str(e)}[/]")
-            import traceback
+            self.server.ai_send(f"出错: {e}")
+        finally:
+            self.agent.driver._silent = False
 
-            traceback.print_exc()
+    def do_thinking(self):
+        if not self.thinking_mgr or not self.server.thinking_enabled:
+            return
+
+        try:
+            state = self.thinking_mgr.state
+            if hasattr(state, "value") and state.value == "idle":
+                elapsed = time.time() - self.last_input_time
+                if elapsed >= self.thinking_interval:
+                    self.last_input_time = time.time()
+                    self.thinking_mgr.transition_to_ai_thinking()
+
+                    state = self.thinking_mgr.state
+                    if state.value == "evolution":
+                        prompt = self.thinking_mgr.build_evolution_prompt(
+                            self.thinking_mgr.research_data
+                        )
+                        title = "Evolution"
+                    else:
+                        prompt = self.thinking_mgr.build_fun_prompt(
+                            self.thinking_mgr.research_data
+                        )
+                        title = "Fun"
+
+                    self.server.ai_send(f"[{title}] 思考中...")
+
+                    self.agent.driver._silent = True
+                    try:
+                        response = self.agent.chat_with_tools(prompt)
+                        reply = self.sanitize(response) if response else "(无响应)"
+                    finally:
+                        self.agent.driver._silent = False
+
+                    self.server.ai_send(f"[{title}] {reply}")
+                    self.thinking_mgr.transition_to_idle()
+        except Exception as e:
+            self.server.ai_send(f"思考出错: {e}")
+
+    def run(self):
+        while self.server.running:
+            try:
+                msg = self.server.ai_recv(timeout=0.5)
+                if msg:
+                    role, content = msg
+                    self.handle_message(role, content)
+
+                self.do_thinking()
+            except Exception as e:
+                self.server.ai_send(f"异常: {e}")
+                time.sleep(1)
+
+
+def run_chat(
+    agent,
+    thinking_mgr=None,
+    initial_messages: list = None,
+    config: dict = None,
+    plugin_lines: list = None,
+):
+    """启动聊天系统"""
+    server = Server()
+    server.start()
+
+    human = HumanClient(server, initial_messages, config, agent, plugin_lines)
+    ai = AIClient(server, agent, thinking_mgr)
+
+    ai_thread = threading.Thread(target=ai.run, daemon=True)
+    ai_thread.start()
+
+    human.run()
+
+    server.stop()
+    ai_thread.join(timeout=2)
+    print("聊天系统已退出")
 
 
 def main():
     config = load_config()
 
     from drivers.cli_driver import CLIDriver
+    from io import StringIO
+    from contextlib import redirect_stdout
 
     model_config = get_active_model(config)
     driver = CLIDriver(model_config=model_config)
-    agent = AgentCore(driver=driver)
 
-    print(f"\n🕊️ 启动 WWG 模式...")
-    print(f"📡 当前媒介: {driver.name} ({driver.model})")
-    print(list_models(config))
-    print()
-    run_wwg(agent, config)
+    plugin_lines = []
+    buf = StringIO()
+    with redirect_stdout(buf):
+        agent = AgentCore(driver=driver, config=config)
+    plugin_lines = [l for l in buf.getvalue().strip().split("\n") if l]
+
+    thinking_mgr = AIThinkingManager(agent, config)
+    thinking_mgr.do_research()
+
+    profile = config.get("profile", {})
+    profile_name = profile.get("name", "助手")
+    profile_greeting = profile.get("greeting", "你好，有什么可以帮你的吗？")
+
+    thinking_icon = " 🧠" if model_config.get("thinking") else ""
+    startup_lines = [
+        f"👋 {profile_name}：{profile_greeting}",
+        f"🤖 模型: {driver.model}{thinking_icon} ❌AI自主思考",
+        "📋 /list /select <id> /clear /render /thinking /quit",
+    ]
+
+    run_chat(agent, thinking_mgr, startup_lines, config, plugin_lines)
 
 
 if __name__ == "__main__":

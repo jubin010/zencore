@@ -1,12 +1,28 @@
 {
   "active_model": 0,
+  "profile": {
+    "name": "小明",
+    "personality": "热情活泼、乐于助人、聪明可靠",
+    "greeting": "你好！我是小明，有什么我可以帮你的吗？",
+    "description": "一个聪明、友好、乐于助人的 AI 助手。喜欢用简洁清晰的语言解释复杂问题。遇到难题时会耐心分析，遇到有趣的问题会积极探讨。始终站在用户的角度思考问题，提供最有价值的帮助。"
+  },
+  "l2_threshold": 30000,
   "models": [
     {
-      "name": "本地 Ollama",
+      "name": "本地 Ollama 4B",
+      "host": "http://localhost:11434",
+      "model": "qwen3.5:4b",
+      "api_key": "ollama",
+      "thinking": false,
+      "context_threshold": 6000
+    },
+    {
+      "name": "本地 Ollama 9B",
       "host": "http://localhost:11434",
       "model": "qwen3.5:9b",
       "api_key": "ollama",
-      "thinking": true
+      "thinking": false,
+      "context_threshold": 24000
     },
     {
       "name": "MiniMax M2.7",
@@ -14,14 +30,16 @@
       "model": "MiniMax-M2.7",
       "api_key": "YOUR_API_KEY_HERE",
       "thinking": true,
-      "thinking_mode": "reasoning_split"
+      "thinking_mode": "reasoning_split",
+      "context_threshold": 24000
     },
     {
       "name": "阿里 Qwen",
       "host": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "model": "qwen-turbo",
       "api_key": "YOUR_API_KEY_HERE",
-      "thinking": false
+      "thinking": false,
+      "context_threshold": 24000
     }
   ]
 }

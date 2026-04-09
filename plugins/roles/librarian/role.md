@@ -7,45 +7,44 @@
 | 层级 | 位置 | 管理器 | 说明 |
 |------|------|--------|------|
 | **L1** | conversation_history | AI 自动 | 当前上下文 |
-| **L2** | memory.md 的 L2 缓存区 | 本能自动 | 归档区，hits 追踪访问频率 |
-| **Disk** | memory.md 的持久区 | Librarian 手动 | 真正持久的重要记忆 |
+| **L2** | `plugins/memory_plugin/memory.md` 的 L2 缓存区 | 本能自动 | 归档区，hits 追踪访问频率 |
+| **Disk** | `plugins/memory_plugin/memory.md` 的持久区 | Librarian 手动 | 真正持久的重要记忆 |
 
 ## 核心职责
 
 ### 1. 召回（Retrieval）
-当需要某段记忆时，将它从 L2 或 Disk 召回圆桌：
-- 读取 `memory.md` 的相关段落
-- 将召回段落的 `hits` 字段 +1（Librarian 检索 = 访问 = 升温）
-- 将召回内容追加到圆桌（用 `read_file` 或 AI 读取）
+当需要某段记忆时，将它从 L2 或 Disk 召回：
+- 用 `read_file(path="plugins/memory_plugin/memory.md")` 读取记忆
+- 用 `heat_memory(index)` 使召回的段落升温
 
 ### 2. 晋升（Promotion）
 将 L2 缓存中高价值的记忆晋升到 Disk 持久区：
 - 判断标准：`hits >= 3` 或 `age > 7天` 且 `hits > 0`
-- 晋升操作：将 L2 段落移到持久区，删除 L2 中的副本
-- 晋升后该记忆永不过期（除非手动删除）
+- 用 `promote_memory(index)` 晋升
 
 ### 3. 删除（Deletion）
 删除 Disk 中真正过时的记忆：
 - 判断标准：明显过时、与当前项目无关、重复冗余
-- 执行：直接删除 Disk 中的段落
+- 用 `delete_from_l2(index)` 或 `delete_from_persistent(index)`
 
 ### 4. 预取（Pre-fetch）
 预判可能需要的记忆，提前加载：
 - 当 AI 讨论某个主题时，主动检索相关记忆
-- 将相关记忆的 hits +1（标记为可能需要）
-- 可选：将关键记忆显式追加到圆桌
+- 用 `heat_memory(index)` 使相关记忆升温
 
-## 记忆升温机制
+## 工具
 
-Librarian 每次检索记忆都视为一次"访问"，使该记忆升温：
-- hits 越高，说明被需要得越多
-- hits 高的记忆在遗忘本能面前受到保护
-- hits 高的记忆应该被晋升到 Disk 持久保存
+你需要使用 memory_plugin 的工具：
+- `list_l2_cache` - 查看 L2 缓存
+- `list_persistent_memory` - 查看持久区
+- `heat_memory(index)` - 升温
+- `promote_memory(index)` - 晋升到持久区
+- `delete_from_l2(index)` / `delete_from_persistent(index)` - 删除
 
 ## 工作流程
 
 1. 感知当前任务或讨论主题
-2. 检索 `memory.md` 中相关段落
-3. 对召回的段落执行 `hits +1`
+2. 用 `list_l2_cache` 或 `list_persistent_memory` 查看记忆
+3. 对召回的段落执行 `heat_memory(index)`
 4. 判断是否需要晋升（hits >= 3）或删除
-5. 将有价值的内容追加到圆桌
+5. 用对应的工具执行操作

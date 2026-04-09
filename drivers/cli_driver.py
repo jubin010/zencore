@@ -83,6 +83,7 @@ class CLIDriver(DriverInterface):
         self.thinking = self.model_config.get("thinking", False)
         self.thinking_mode = self.model_config.get("thinking_mode", "")
         self._client = None
+        self._silent = False
 
     def switch_model(self, model_config: dict):
         """切换模型配置"""
@@ -101,7 +102,7 @@ class CLIDriver(DriverInterface):
             if not self.api_key or self.api_key.lower() == "ollama":
                 import ollama
 
-                self._client = ollama.Client(host=self.host)
+                self._client = ollama.Client(host=self.host, timeout=300)
             else:
                 from openai import OpenAI
 
@@ -121,13 +122,16 @@ class CLIDriver(DriverInterface):
         return ""
 
     def send_message(self, content: str) -> None:
-        console.print(Markdown(content))
+        if not self._silent:
+            console.print(Markdown(content))
 
     def send_image(self, path: str) -> None:
-        console.print(f"[bold yellow][图片: {path}][/]")
+        if not self._silent:
+            console.print(f"[bold yellow][图片: {path}][/]")
 
     def send_file(self, path: str) -> None:
-        console.print(f"[bold yellow][文件: {path}][/]")
+        if not self._silent:
+            console.print(f"[bold yellow][文件: {path}][/]")
 
     def get_input(self, prompt: str = "") -> str:
         try:
@@ -138,9 +142,12 @@ class CLIDriver(DriverInterface):
             return ""
 
     def show_loading(self, message: str = "处理中..."):
-        console.print(f"[dim]⏳ {message}...[/]")
+        if not self._silent:
+            console.print(f"[dim]⏳ {message}...[/]")
 
     def start_thinking(self):
+        if self._silent:
+            return
         from rich.spinner import Spinner
         from rich.live import Live
 
@@ -149,12 +156,15 @@ class CLIDriver(DriverInterface):
         self._thinking_live.start()
 
     def stop_thinking(self):
+        if self._silent:
+            return
         if hasattr(self, "_thinking_live") and self._thinking_live:
             self._thinking_live.stop()
             self._thinking_live = None
 
     def toast(self, message: str, duration: int = 3) -> None:
-        console.print(Panel(message, title="📢 提示", border_style="yellow"))
+        if not self._silent:
+            console.print(Panel(message, title="📢 提示", border_style="yellow"))
 
     def set_title(self, title: str) -> None:
         pass
@@ -259,7 +269,7 @@ class CLIDriver(DriverInterface):
                 if not native_tool_calls and self.thinking and thinking:
                     native_tool_calls = _parse_ollama_thinking_toolcalls(thinking)
 
-                if self.thinking and thinking:
+                if self.thinking and thinking and not self._silent:
                     console.print(
                         Panel(
                             Markdown(thinking),
@@ -309,7 +319,7 @@ class CLIDriver(DriverInterface):
                 elif hasattr(message, "thinking") and message.thinking:
                     thinking = _sanitize(message.thinking)
 
-                if thinking:
+                if thinking and not self._silent:
                     console.print(
                         Panel(
                             Markdown(thinking),

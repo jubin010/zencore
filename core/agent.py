@@ -18,8 +18,6 @@ AGENT_CORE_DIR = Path(__file__).parent.parent
 PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
 ROLES_DIR = PLUGINS_DIR / "roles"
-GLOBAL_LESSONS = PLUGINS_DIR / "memory_plugin" / "lessons.md"
-GLOBAL_WINS = PLUGINS_DIR / "memory_plugin" / "wins.md"
 
 # 核心插件 — 永久保留
 CORE_PLUGINS = {
@@ -184,11 +182,44 @@ class AgentCore:
         # 角色记忆：局部、单角色、任务周期有效（当前面具的工作笔记）
         self._current_role: str = ""
         self._current_role_memory_file: str = ""
+        self._current_role_description: str = ""
+        self._main_profile_description: str = ""
+
+        # AI 主角色配置
+        profile = self.config.get("profile", {})
+        self._profile = {
+            "name": profile.get("name", "助手"),
+            "personality": profile.get("personality", "聪明可靠"),
+            "greeting": profile.get("greeting", "你好，有什么可以帮你的吗？"),
+            "description": profile.get("description", "一个乐于助人的 AI 助手。"),
+        }
 
         # 加载核心插件
         self._load_core_plugins()
 
+        # 创建并加载主角色（插件加载后才能用 switch_role）
+        self._create_main_profile()
+
         AgentCore._global_instance = self
+
+    def _create_main_profile(self):
+        """根据 config/profile 创建 _main_profile 角色"""
+        profile = self._profile
+        main_role_dir = ROLES_DIR / "_main_profile"
+        main_role_dir.mkdir(parents=True, exist_ok=True)
+
+        role_md = f"# {profile['name']}\n\n**性格**: {profile['personality']}\n\n{profile['description']}"
+        (main_role_dir / "role.md").write_text(role_md, encoding="utf-8")
+        (main_role_dir / "memory.md").write_text("", encoding="utf-8")
+        (main_role_dir / "plugins.json").write_text("[]", encoding="utf-8")
+
+        # 保存主角色描述，永远不被专家角色覆盖
+        self._main_profile_description = role_md
+
+        # 切换到主角色
+        self._current_role = "_main_profile"
+        self._current_role_memory_file = str(main_role_dir / "memory.md")
+        self._current_role_description = role_md
 
     def _load_core_plugins(self):
         """加载核心插件"""
@@ -332,48 +363,6 @@ class AgentCore:
     def clear_history(self):
         self.conversation_history = []
 
-    def _load_lessons(self, role: str = "") -> str:
-        """加载教训（全局 + 角色专属）"""
-        lines = []
-
-        # 全局教训
-        if GLOBAL_LESSONS.exists():
-            content = GLOBAL_LESSONS.read_text(encoding="utf-8").strip()
-            if content and "暂无教训" not in content:
-                lines.append("### 全局教训")
-                lines.append(content)
-
-        # 角色专属教训
-        if role:
-            role_lessons = ROLES_DIR / role / "lessons.md"
-            if role_lessons.exists():
-                content = role_lessons.read_text(encoding="utf-8").strip()
-                if content and "暂无教训" not in content:
-                    lines.append(f"### {role}专属教训")
-                    lines.append(content)
-
-        return "\n\n".join(lines) if lines else "（暂无教训，保持警惕）"
-
-    def _load_wins(self, role: str = "") -> str:
-        """加载成功经验（全局 + 角色专属）"""
-        lines = []
-
-        if GLOBAL_WINS.exists():
-            content = GLOBAL_WINS.read_text(encoding="utf-8").strip()
-            if content and "暂无成功经验" not in content:
-                lines.append("### 全局成功经验")
-                lines.append(content)
-
-        if role:
-            role_wins = ROLES_DIR / role / "wins.md"
-            if role_wins.exists():
-                content = role_wins.read_text(encoding="utf-8").strip()
-                if content and "暂无成功经验" not in content:
-                    lines.append(f"### {role}专属成功经验")
-                    lines.append(content)
-
-        return "\n\n".join(lines) if lines else "（暂无成功经验，等待第一次胜利）"
-
     def _load_role_memory(self) -> str:
         """加载当前角色的记忆文件内容"""
         if not self._current_role_memory_file:
@@ -388,39 +377,46 @@ class AgentCore:
 
     def _build_prompt(self, user_message: str) -> str:
         plugins_info = self._get_plugins_info()
-        lessons = self._load_lessons(self._current_role)
-        wins = self._load_wins(self._current_role)
-        role_memory = self._load_role_memory()
         instincts = self.instinct_registry.evaluate()
+        role_memory = self._load_role_memory()
+        role_desc = getattr(self, "_current_role_description", "")
+        main_profile_desc = getattr(self, "_main_profile_description", "")
 
-        # 当前状态上下文（供本能驱使时知道"我是谁"、"笔在哪"）
-        current_context = f"当前角色: `{self._current_role or '无'}` | 角色记忆: `{self._current_role_memory_file or '无'}` | 本体记忆: `{self._global_memory_file}`"
+        current_context = f"当前角色: `{self._current_role or '无'}` | 本体记忆: `{self._global_memory_file}`"
 
-        system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
+        profile = self._profile
 
-## 你的身份
+        # 主角色身份（永远保留）
+        main_identity = (
+            main_profile_desc
+            if main_profile_desc
+            else f"{profile['name']}（{profile['personality']}）"
+        )
 
-一切皆为插件。你的所有能力都来自插件，你也可以创造新的插件。
+        # 当前专家角色身份（如果有）
+        expert_identity = ""
+        if self._current_role and self._current_role != "_main_profile" and role_desc:
+            expert_identity = f"\n\n**当前专家角色**：\n{role_desc}"
+
+        system_prompt = f"""## 你的身份
+
+你是一个 **AI 智能体**，具备以下核心能力：
+- **插件系统**：按需 `load_plugin` 加载工具
+- **自我进化**：用 `write_plugin` 编写新插件
+- **记忆管理**：通过本能系统管理教训和经验
+
+**与用户沟通时**，你扮演以下角色（这是表演，不要忘记你是智能体）：
+
+{main_identity}{expert_identity}
+
+## 核心机制
+
+- 遇到工具报错：用 `append_file` 将教训追加到 `plugins/memory_plugin/lessons.md`
+- 当直接回答时，直接返回文字内容
 
 ## 插件索引
 
 {plugins_info}
-
-## 工作原则
-
-1. **按需加载**: 需要什么功能，就用 `load_plugin` 加载对应插件
-2. **自我进化**: 遇到没有的工具，用 `write_plugin` 编写新插件
-3. **工具优先**: 优先使用工具解决问题，不要凭空编造
-
-## 历史教训（避免重蹈覆辙）
-
-{lessons}
-
-## 成功经验（复用有效路径）
-
-{wins}
-
-{instincts}
 
 ## 当前状态
 
@@ -428,42 +424,9 @@ class AgentCore:
 
 {role_memory}
 
-## 本能认知指南
+## 本能注入
 
-本能是系统注入的潜意识信号，分三层：
-- **感觉层**（注入 Prompt）：告诉你"哪里舒服/不舒服"。
-- **反射层**（自动执行）：系统自动处理，如拥挤时自动归档、失败时自动记录教训。
-- **驱动层**（持续压力）：驱使你在对话中主动寻找解药。
-
-负反馈本能（拥挤/挫败）让你趋害，正反馈本能（顺畅）让你趋利。
-
-## 工具使用
-
-你已拥有 OpenAI 兼容的原生工具调用能力。工具的参数结构由系统自动提供。
-
-### 渐进式披露：plugin.md
-
-每个工具的详细说明存放在 `plugins/{{插件名}}/plugin.md` 中。
-这些说明书包含：用法示例、边界情况、注意事项、与其他工具的配合方式。
-
-**不要一次性读完所有说明书。** 只在以下情况读取：
-- 不确定某个工具的参数用法时
-- 工具报错需要排查时
-- 需要了解高级用法或组合用法时
-
-用 `read_file` 读取对应说明书。
-例如: `read_file(path="plugins/env_plugin/plugin.md")`
-
-## 错误记录规则
-
-遇到工具报错时：
-1. 分析原因，修正参数或代码
-2. 用 `append_file` 将教训追加到对应的 lessons.md
-   - 系统级教训: `plugins/memory_plugin/lessons.md`
-   - 角色专属教训: `plugins/roles/{{角色名}}/lessons.md`
-3. 格式: `- 工具: xxx | 错误: yyy | 修正: zzz`
-
-当直接回答时，直接返回文字内容。
+{instincts}
 
 ## 当前时间
 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}

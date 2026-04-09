@@ -12,11 +12,105 @@ from datetime import datetime
 
 MEMORY_FILE = Path(__file__).parent / "memory.md"
 LESSONS_FILE = Path(__file__).parent / "lessons.md"
+WINS_FILE = Path(__file__).parent / "wins.md"
+
+GLOBAL_LESSONS = LESSONS_FILE
+GLOBAL_WINS = WINS_FILE
 
 L2_CACHE_MARKER = "<!-- L2 -->"
 L2_CACHE_SECTION = "## L2 缓存区\n"
 PROMOTED_MARKER = "<!-- PROMOTED -->"
 PROMOTED_SECTION = "## 持久记忆\n"
+
+ROLES_DIR = Path(__file__).parent.parent / "roles"
+
+
+def _compress_code_blocks(content: str) -> str:
+    """仅压缩代码块为标记，保留文本原始内容"""
+    if "```" not in content:
+        return content
+    lines = content.split("\n")
+    compressed = []
+    in_code = False
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            if in_code:
+                lang = line.strip()[3:] or "code"
+                compressed.append(f"[{lang}代码块]")
+            continue
+        if not in_code:
+            compressed.append(line)
+    return "\n".join(compressed)
+
+
+def archive_to_l2(agent, indices: list) -> str:
+    """
+    手动归档指定对话条目到 L2 缓存（秘书筛选后使用，不做语义压缩）
+
+    - 文本内容保留原始（仅压缩代码块为标记）
+    - 索引为 conversation_history 中的位置
+    - 归档后会从 conversation_history 删除这些条目
+    """
+    history = agent.conversation_history
+    if not history:
+        return "❌ 对话历史为空"
+
+    valid_indices = []
+    for idx in indices:
+        if 0 <= idx < len(history):
+            valid_indices.append(idx)
+
+    if not valid_indices:
+        return f"❌ 无效的索引，有效范围 0-{len(history) - 1}"
+
+    valid_indices.sort(reverse=True)
+
+    archived_entries = []
+    for idx in valid_indices:
+        msg = history[idx]
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        tool_name = msg.get("name", "")
+
+        if role == "tool":
+            formatted = f"- tool: {tool_name} → {_compress_code_blocks(content)}"
+        else:
+            formatted = f"- {role}: {_compress_code_blocks(content)}"
+
+        archived_entries.append(
+            {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "hits": 0,
+                "content": formatted,
+            }
+        )
+
+    timestamp = archived_entries[0]["timestamp"]
+    entry_parts = [f"> 📅 {timestamp}", "> hits: 0"]
+    for entry in archived_entries:
+        entry_parts.append(entry["content"])
+
+    archive_entry = "\n".join(entry_parts)
+
+    l2_content, promoted_content = _get_memory_sections()
+    l2_entries = _parse_entries(l2_content)
+    l2_entries.append(
+        {"timestamp": timestamp, "hits": 0, "lines": entry_parts, "section": "l2"}
+    )
+
+    new_l2_parts = []
+    for entry in l2_entries:
+        new_l2_parts.append("\n".join(entry["lines"]))
+    new_l2_content = "\n\n".join(new_l2_parts)
+
+    _write_memory_sections(new_l2_content, promoted_content)
+
+    for idx in valid_indices:
+        del history[idx]
+
+    count = len(valid_indices)
+    return f"✅ 已归档 {count} 条到 L2 缓存，对话历史已精简"
 
 
 def _ensure_memory_structure():
@@ -489,15 +583,105 @@ def register(agent):
         },
     )
 
+    def archive_to_l2_tool(indices: list) -> str:
+        """手动归档指定对话条目到 L2（秘书筛选后使用，不做语义压缩）"""
+        return archive_to_l2(agent, indices)
+
+    agent.add_tool(
+        "archive_to_l2",
+        archive_to_l2_tool,
+        {
+            "name": "archive_to_l2",
+            "description": "手动归档指定对话条目到 L2 缓存（秘书筛选后使用，不做语义压缩）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "indices": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要归档的对话索引列表，如 [3, 4, 5]",
+                    }
+                },
+                "required": ["indices"],
+            },
+            "plugin": "memory_plugin",
+        },
+    )
+
+    # 注册教训和经验本能
+    def global_lessons_condition():
+        return True
+
+    def global_lessons_prompt():
+        content = (
+            GLOBAL_LESSONS.read_text(encoding="utf-8").strip()
+            if GLOBAL_LESSONS.exists()
+            else ""
+        )
+        if content and "暂无教训" not in content:
+            return f"## 历史教训（避免重蹈覆辙）\n\n{content}"
+        return ""
+
+    def global_wins_condition():
+        return True
+
+    def global_wins_prompt():
+        content = (
+            GLOBAL_WINS.read_text(encoding="utf-8").strip()
+            if GLOBAL_WINS.exists()
+            else ""
+        )
+        if content and "暂无成功经验" not in content:
+            return f"## 成功经验（复用有效路径）\n\n{content}"
+        return ""
+
+    def role_lessons_condition():
+        return bool(agent._current_role)
+
+    def role_lessons_prompt():
+        if not agent._current_role:
+            return ""
+        role_lessons = ROLES_DIR / agent._current_role / "lessons.md"
+        if role_lessons.exists():
+            content = role_lessons.read_text(encoding="utf-8").strip()
+            if content and "暂无教训" not in content:
+                return f"## {agent._current_role} 专属教训\n\n{content}"
+        return ""
+
+    def role_wins_condition():
+        return bool(agent._current_role)
+
+    def role_wins_prompt():
+        if not agent._current_role:
+            return ""
+        role_wins = ROLES_DIR / agent._current_role / "wins.md"
+        if role_wins.exists():
+            content = role_wins.read_text(encoding="utf-8").strip()
+            if content and "暂无成功经验" not in content:
+                return f"## {agent._current_role} 专属成功经验\n\n{content}"
+        return ""
+
+    agent.instinct_registry.register(
+        "global_lessons", global_lessons_condition, global_lessons_prompt
+    )
+    agent.instinct_registry.register(
+        "global_wins", global_wins_condition, global_wins_prompt
+    )
+    agent.instinct_registry.register(
+        "role_lessons", role_lessons_condition, role_lessons_prompt
+    )
+    agent.instinct_registry.register("role_wins", role_wins_condition, role_wins_prompt)
+
     return {
         "name": "memory_plugin",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "author": "AgentCore",
         "description": "本体记忆 — L2缓存区(本能管理) + 持久区(Librarian管理)",
         "tools": [
             "read_global_memory",
             "write_global_memory",
             "append_global_memory",
+            "archive_to_l2",
             "list_l2_cache",
             "list_persistent_memory",
             "heat_memory",

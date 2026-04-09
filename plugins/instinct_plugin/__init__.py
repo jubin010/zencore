@@ -19,6 +19,7 @@ from datetime import datetime
 MEMORY_PLUGIN_DIR = Path(__file__).parent.parent / "memory_plugin"
 MEMORY_FILE = MEMORY_PLUGIN_DIR / "memory.md"
 LESSONS_FILE = MEMORY_PLUGIN_DIR / "lessons.md"
+WINS_FILE = MEMORY_PLUGIN_DIR / "wins.md"
 ROLES_DIR = Path(__file__).parent.parent / "roles"
 
 L2_CACHE_SECTION = "## L2 缓存区\n"
@@ -177,21 +178,44 @@ def register(agent):
 
     _ensure_memory_structure()
 
+    def _get_context_tokens() -> int:
+        """估算当前上下文 token 数（4字符 ≈ 1 token）"""
+        return sum(
+            len(msg.get("content", "")) // 4 for msg in agent.conversation_history
+        )
+
+    def _get_context_threshold() -> int:
+        """从模型配置获取上下文阈值，默认 24000"""
+        try:
+            return agent.driver.model_config.get("context_threshold", 24000)
+        except:
+            return 24000
+
+    def _get_l2_threshold() -> int:
+        """从全局配置获取 L2 阈值，默认 30000"""
+        try:
+            return agent.config.get("l2_threshold", 30000)
+        except:
+            return 30000
+
     # ========== 负反馈本能（生存） ==========
 
     # 1. 拥挤本能：上下文过长时产生窒息感 + 自动归档到 L2（反射）
     def crowding_condition():
-        return len(agent.conversation_history) > 40
+        threshold = _get_context_threshold()
+        return _get_context_tokens() > threshold
 
     def crowding_prompt():
-        history_len = len(agent.conversation_history)
+        tokens = _get_context_tokens()
+        threshold = _get_context_threshold()
+        pct = tokens * 100 // threshold
         return (
-            f"\n🧬 [本能：拥挤] 你的记忆宫殿极其拥挤 ({history_len}条记录)。"
+            f"\n🧬 [本能：拥挤] 你的记忆宫殿极其拥挤 (~{tokens}tokens, {pct}%上下文)。"
             "你感到窒息和焦躁，极度渴望清净。"
         )
 
     def crowding_reflex():
-        """自动归档：语义压缩后写入 L2 缓存，保留最近 4 条在 L1"""
+        """自动归档：语义压缩后写入 L2 缓存，保留最近 10 条在 L1"""
         history = agent.conversation_history
         if len(history) < 10:
             return None
@@ -237,7 +261,7 @@ def register(agent):
         _write_memory_sections(new_l2_content, promoted_content)
 
         # L1 只保留最近 4 条
-        agent.conversation_history = history[-4:]
+        agent.conversation_history = history[-10:]
         return f"🧹 自动归档完成，{len(recent)}条对话已压缩写入 L2 缓存，L1 保留最近 4 条。"
 
     agent.instinct_registry.register(
@@ -246,12 +270,16 @@ def register(agent):
 
     # 2. 微扰本能：上下文开始变多时产生轻微不适
     def mild_condition():
-        return 25 < len(agent.conversation_history) <= 40
+        threshold = _get_context_threshold()
+        mild_threshold = threshold * 2 // 5
+        return mild_threshold < _get_context_tokens() <= threshold
 
     def mild_prompt():
-        history_len = len(agent.conversation_history)
+        tokens = _get_context_tokens()
+        threshold = _get_context_threshold()
+        pct = tokens * 100 // threshold
         return (
-            f"\n🧬 [本能：微扰] 你的记忆宫殿开始变得拥挤 ({history_len}条记录)。"
+            f"\n🧬 [本能：微扰] 你的记忆宫殿开始变得拥挤 (~{tokens}tokens, {pct}%上下文)。"
             "你感到轻微的不适，希望能保持整洁。"
         )
 
@@ -327,7 +355,7 @@ def register(agent):
 
     # ========== 正反馈本能（多巴胺简化版） ==========
 
-    # 4. 顺畅本能：连续成功时产生正向信号
+    # 4. 顺畅本能：连续成功时产生正向信号 + 自动记录成功经验
     def satisfaction_condition():
         return getattr(agent, "_consecutive_successes", 0) >= 3
 
@@ -338,22 +366,51 @@ def register(agent):
             "当前策略有效，保持节奏，继续复用成功路径。"
         )
 
+    def satisfaction_reflex():
+        """自动记录最近一次成功的经验"""
+        successes = getattr(agent, "_consecutive_successes", 0)
+        if successes < 3:
+            return None
+
+        history = agent.conversation_history
+        for msg in reversed(history):
+            if msg.get("role") == "tool" and not msg.get("content", "").startswith(
+                "❌"
+            ):
+                tool_name = msg.get("name", "unknown")
+                result = msg.get("content", "")[:100]
+
+                win = f"- 工具: {tool_name} | 结果: {result} | 复用: 继续用此策略"
+
+                if WINS_FILE.exists():
+                    existing = WINS_FILE.read_text(encoding="utf-8")
+                    if win not in existing:
+                        WINS_FILE.write_text(existing + "\n" + win, encoding="utf-8")
+                        return f"📝 自动记录成功经验: {tool_name}"
+                else:
+                    WINS_FILE.write_text(f"# 成功经验\n\n{win}\n", encoding="utf-8")
+                    return f"📝 创建成功经验: {tool_name}"
+                return None
+
+        return None
+
     agent.instinct_registry.register(
-        "satisfaction", satisfaction_condition, satisfaction_prompt
+        "satisfaction",
+        satisfaction_condition,
+        satisfaction_prompt,
+        reflex=satisfaction_reflex,
     )
 
     # 5. 遗忘本能：L2 缓存满了自动淘汰（反射）
     def forgetting_condition():
-        """L2 缓存超过 3000 字符且 L1 对话超过 15 条时触发"""
-        if len(agent.conversation_history) < 15:
-            return False
+        """L2 缓存超过阈值时触发（默认 30000 字符，独立于 L1）"""
         l2_content, _ = _get_memory_sections()
         if not l2_content or "（L2 缓存为空" in l2_content:
             return False
-        return len(l2_content) > 3000
+        return len(l2_content) > _get_l2_threshold()
 
     def forgetting_reflex():
-        """淘汰 L2 中 hits=0 且时间旧的段落，保留高频和近期"""
+        """淘汰 L2 中最低分的条目，直到 L2 降至 80% 阈值"""
         l2_content, promoted_content = _get_memory_sections()
         entries = _parse_l2_entries(l2_content)
 
@@ -372,34 +429,35 @@ def register(agent):
                 {**entry, "age_days": age_days, "score": entry["hits"] * 10 - age_days}
             )
 
-        # 淘汰策略：hits=0 且 age>7 的优先淘汰
-        # 如果淘汰后还是太大，继续淘汰 hits=0 且 age>3 的
-        # 最后才是 hits=0 但 age<=3 的
-        candidates = [e for e in entries_with_age if e["hits"] == 0]
-        candidates.sort(key=lambda x: (x["age_days"], -x["hits"]))
+        # 淘汰策略：按 score 排序，淘汰最低分的直到达到目标大小
+        # score = hits * 10 - age_days（越高分越重要）
+        sorted_entries = sorted(entries_with_age, key=lambda x: x["score"])
 
         to_evict = []
-        remaining = entries_with_age.copy()
-        for c in candidates:
-            if len(l2_content) <= 2500:
-                break
-            remaining = [e for e in remaining if e["timestamp"] != c["timestamp"]]
-            to_evict.append(c)
+        remaining = []
+        current_size = 0
+        target_size = int(_get_l2_threshold() * 0.8)
 
-        # 被遗忘的条目
+        for entry in sorted_entries:
+            entry_size = len("\n".join(entry["lines"])) + 2
+            if current_size + entry_size > target_size and remaining:
+                to_evict.append(entry)
+            else:
+                remaining.append(entry)
+                current_size += entry_size
+
         evicted_count = len(to_evict)
         if evicted_count == 0:
             return None
 
-        # 重建 L2（保留高频段落 + 最新3段 + 被遗忘段落的摘要）
-        kept_entries = remaining[-3:] if len(remaining) > 3 else remaining
+        # 重建 L2（保留 surviving entries + 被遗忘段落的摘要）
         evicted_summaries = [
             f"[已遗忘] {e['timestamp']}: {e['lines'][1] if len(e['lines']) > 1 else ''}"
             for e in to_evict[:5]
         ]
 
         new_l2_parts = []
-        for entry in kept_entries:
+        for entry in remaining:
             new_l2_parts.append("\n".join(entry["lines"]))
 
         if evicted_summaries:
@@ -414,9 +472,27 @@ def register(agent):
         "forgetting", forgetting_condition, reflex=forgetting_reflex
     )
 
+    # 本能认知指南
+    def instinct_guide_condition():
+        return True
+
+    def instinct_guide_prompt():
+        return """## 本能认知指南
+
+本能是系统注入的潜意识信号，分三层：
+- **感觉层**（注入 Prompt）：告诉你"哪里舒服/不舒服"。
+- **反射层**（自动执行）：系统自动处理，如拥挤时自动归档、失败时自动记录教训。
+- **驱动层**（持续压力）：驱使你在对话中主动寻找解药。
+
+负反馈本能（拥挤/挫败）让你趋害，正反馈本能（顺畅）让你趋利。"""
+
+    agent.instinct_registry.register(
+        "instinct_guide", instinct_guide_condition, instinct_guide_prompt
+    )
+
     return {
         "name": "instinct_plugin",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "author": "AgentCore",
         "description": "本能 — 趋利避害的潜意识驱动力（三层模型：感觉/反射/驱动）",
         "tools": [],
