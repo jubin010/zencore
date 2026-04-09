@@ -387,9 +387,17 @@ class Server:
         if self.running:
             self.ai_queue.put(("human", msg))
 
-    def ai_send(self, msg: str):
+    def ai_send(self, msg: str, role: str = "ai"):
         if self.running:
-            self.human_queue.put(("ai", msg))
+            self.human_queue.put((role, msg))
+
+    def tool_send(self, msg):
+        if self.running:
+            if isinstance(msg, tuple) and len(msg) == 2:
+                role, actual_msg = msg
+                self.human_queue.put((role, actual_msg))
+            else:
+                self.human_queue.put(("tool", msg))
 
     def ai_recv(self, timeout=0.1):
         try:
@@ -558,14 +566,27 @@ class ChatUI(App):
     def _format_time(self):
         return datetime.now().strftime("%H:%M")
 
-    def _format_msg(self, role: str, content: str):
-        icon = "🤖" if role == "AI" else "👤"
+    def _format_msg(self, role: str, content: str, border_color: str = None):
+        color_map = {"AI": "cyan", "👤": "red", "🔧工具": "yellow", "🧠本能": "magenta"}
+        icon_map = {"AI": "🤖", "👤": "👤", "🔧工具": "🔧", "🧠本能": "🧠"}
+        icon = icon_map.get(role, "🤖")
         timestamp = self._format_time()
-        color = "cyan" if role == "AI" else "red"
-        border_color = "cyan" if role == "AI" else "red"
-        title = Text.from_markup(f"[{color}]{icon} {role} [dim]{timestamp}[/dim]")
+        color = color_map.get(role, "cyan")
+        border_color = border_color or ("cyan" if role == "AI" else "red")
+        title_icon = "" if role in ("🔧工具", "🧠本能", "👤") else icon
+        title = Text.from_markup(f"[{color}]{title_icon}{role} [dim]{timestamp}[/dim]")
+
+        if role == "🔧工具":
+            from rich.text import Text as RText
+
+            lines = content.split("\n")
+            styled_lines = [RText(line, style="on #111111") for line in lines]
+            renderable = RText("\n").join(styled_lines)
+        else:
+            renderable = Markdown(content)
+
         panel = Panel(
-            Markdown(content),
+            renderable,
             title=title,
             border_style=border_color,
             box=box_type.ROUNDED,
@@ -579,11 +600,25 @@ class ChatUI(App):
     def _poll_ai_messages(self):
         while True:
             try:
-                msg = self.server.human_queue.get_nowait()
-                _, content = msg
-                self._plain_messages.append(f"[{self._format_time()}] AI: {content}")
-                if self._render_mode and self._msg_log:
-                    self._msg_log.write(self._format_msg("AI", content))
+                role, content = self.server.human_queue.get_nowait()
+                if role == "tool":
+                    self._plain_messages.append(f"[{self._format_time()}] 🔧 {content}")
+                    if self._render_mode and self._msg_log:
+                        self._msg_log.write(
+                            self._format_msg("🔧工具", content, border_color="yellow")
+                        )
+                elif role == "reflex":
+                    self._plain_messages.append(f"[{self._format_time()}] {content}")
+                    if self._render_mode and self._msg_log:
+                        self._msg_log.write(
+                            self._format_msg("🧠本能", content, border_color="magenta")
+                        )
+                else:
+                    self._plain_messages.append(
+                        f"[{self._format_time()}] AI: {content}"
+                    )
+                    if self._render_mode and self._msg_log:
+                        self._msg_log.write(self._format_msg("AI", content))
             except queue.Empty:
                 break
 
@@ -597,8 +632,8 @@ class ChatUI(App):
         if text.startswith("/"):
             self._handle_command(text, msg_log)
         else:
-            self._plain_messages.append(f"[{self._format_time()}] You: {text}")
-            msg_log.write(self._format_msg("You", text))
+            self._plain_messages.append(f"[{self._format_time()}] 👤: {text}")
+            msg_log.write(self._format_msg("👤", text))
             self.server.human_send(text)
 
     def _handle_command(self, cmd: str, msg_log: RichLog):
@@ -721,7 +756,9 @@ class AIClient:
     def handle_message(self, role: str, content: str):
         try:
             self.agent.driver._silent = True
-            response = self.agent.chat_with_tools(content)
+            response = self.agent.chat_with_tools(
+                content, on_tool_result=lambda msg: self.server.tool_send(msg)
+            )
             reply = self.sanitize(response) if response else "(无响应)"
             self.server.ai_send(reply)
 

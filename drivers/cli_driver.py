@@ -121,8 +121,8 @@ class CLIDriver(DriverInterface):
             return "\n".join(parts)
         return ""
 
-    def send_message(self, content: str) -> None:
-        if not self._silent:
+    def send_message(self, content: str, force: bool = False) -> None:
+        if force or not self._silent:
             console.print(Markdown(content))
 
     def send_image(self, path: str) -> None:

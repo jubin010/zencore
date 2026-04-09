@@ -476,7 +476,15 @@ class AgentCore:
             )
         return result
 
-    def chat_with_tools(self, message: str) -> str:
+    def chat_with_tools(self, message: str, on_tool_result: callable = None) -> str:
+        """
+        Args:
+            message: 用户消息
+            on_tool_result: 工具/本能消息回调，签名为 on_tool_result((role, msg))
+              - role="ai": AI消息（工具调用显示）
+              - role="tool": 工具返回（黄色气泡）
+              - role="reflex": 本能反射（紫色气泡）
+        """
         self.add_message("user", message)
         self._consecutive_failures = 0
         self._consecutive_successes = 0
@@ -493,17 +501,17 @@ class AgentCore:
             if total_failures >= MAX_TOTAL_FAILURES:
                 return f"❌ 已达到最大尝试次数 ({MAX_TOTAL_FAILURES})。我可能陷入了死循环，请人类协助。"
 
-            # 触发反射层本能（自动执行，不经过 AI）
+            # 触发反射层本能（自动执行，不经过 AI）- 只通过回调通知，不加入对话历史
             reflex_results = self.instinct_registry.fire_reflexes()
             for reflex in reflex_results:
                 if "result" in reflex:
-                    self.add_message(
-                        "system", f"[反射执行] {reflex['name']}: {reflex['result']}"
-                    )
+                    msg = f"🧠 [本能] {reflex['name']}: {reflex['result']}"
+                    if on_tool_result:
+                        on_tool_result(("reflex", msg))
                 elif "error" in reflex:
-                    self.add_message(
-                        "system", f"[反射异常] {reflex['name']}: {reflex['error']}"
-                    )
+                    msg = f"⚠️ [本能异常] {reflex['name']}: {reflex['error']}"
+                    if on_tool_result:
+                        on_tool_result(("reflex", msg))
 
             # 构建完整消息
             sys_prompt = json.loads(self._build_prompt(""))[0]["content"]
@@ -545,6 +553,22 @@ class AgentCore:
                 except:
                     tool_params = {}
 
+                # 工具调用消息
+                args_list = []
+                for k, v in tool_params.items():
+                    v_str = repr(v)
+                    if len(v_str) > 30:
+                        v_str = v_str[:30] + "..."
+                    args_list.append(f"{k}={v_str}")
+                args_display = ", ".join(args_list)
+                if len(args_display) > 100:
+                    args_display = args_display[:100] + "..."
+                tool_info = self.tool_registry._tools.get(tool_name)
+                plugin_name = tool_info.get("plugin", "?") if tool_info else "?"
+                call_msg = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
+                if on_tool_result:
+                    on_tool_result(("ai", call_msg))
+
                 tool_result = self.execute_tool(tool_name, **tool_params)
 
                 if tool_result.startswith("❌ [ERROR]"):
@@ -555,7 +579,15 @@ class AgentCore:
                     self._consecutive_failures = 0
                     self._consecutive_successes += 1
 
+                # 工具返回加入 history 供 AI 推理，同时发送到 TUI 显示
                 self.add_message("tool", content=tool_result, tool_call_id=tool_id)
+                if len(tool_result) > 300:
+                    display_result = tool_result[:300] + "\n... (已截断)"
+                else:
+                    display_result = tool_result
+                result_msg = f"```\n{display_result}\n```"
+                if on_tool_result:
+                    on_tool_result(("tool", result_msg))
 
     def _sanitize_text(self, text: str) -> str:
         """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""

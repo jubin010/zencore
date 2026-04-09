@@ -9,10 +9,19 @@ role_plugin - 角色
 """
 
 import json
+import sys
 from pathlib import Path
 from datetime import datetime
 
 ROLES_DIR = Path(__file__).parent.parent / "roles"
+CORE_PLUGINS = {
+    "plugin_builder",
+    "env_plugin",
+    "memory_plugin",
+    "watcher_plugin",
+    "role_plugin",
+    "instinct_plugin",
+}
 
 
 def register(agent):
@@ -134,18 +143,15 @@ def register(agent):
         if agent._current_role and agent._current_role_memory_file:
             _persist_role_working_memory(agent)
 
-        # 2. 清空 L1（释放空间）- 保留系统提示和本能信息
-        agent.conversation_history = []
-
-        # 3. 加载新角色
+        # 2. 加载新角色（不清空 L1 - 共享上下文）
         agent._current_role = role_name
-        memory_file = role_dir / "memory.md"
+        memory_file = role_dir / "role.md" / "memory.md"
         if memory_file.exists():
             agent._current_role_memory_file = str(memory_file)
         else:
             agent._current_role_memory_file = ""
 
-        # 4. 读取角色描述、插件清单和记忆
+        # 3. 读取角色描述、插件清单和记忆
         role_desc = ""
         role_file = role_dir / "role.md"
         if role_file.exists():
@@ -153,14 +159,24 @@ def register(agent):
 
         plugins_file = role_dir / "plugins.json"
         plugins_info = ""
+        new_role_needs_non_core = []
         if plugins_file.exists():
             plugins = json.loads(plugins_file.read_text(encoding="utf-8"))
             if plugins:
+                new_role_needs_non_core = [p for p in plugins if p not in CORE_PLUGINS]
                 plugins_info = (
-                    f"\n\n所需插件: {', '.join(plugins)}\n请用 load_plugin 逐一加载"
+                    f"\n\n💡 建议插件: {', '.join(plugins)}\n请用 load_plugin 按需加载"
                 )
             else:
                 plugins_info = "\n\n（此角色无需额外插件）"
+
+        # 卸载不再需要的非核心插件（非核心插件槽位用完就空着）
+        for prev in list(agent._loaded_plugins):
+            if prev not in CORE_PLUGINS and prev not in new_role_needs_non_core:
+                agent._remove_plugin_tools(prev)
+                agent._loaded_plugins.discard(prev)
+                if prev in sys.modules:
+                    del sys.modules[f"plugins.{prev}"]
 
         # 5. 加载角色记忆到 L1（作为系统上下文的一部分）
         role_memory_content = ""
@@ -173,9 +189,9 @@ def register(agent):
         if role_desc:
             msg += f"\n\n身份:\n{role_desc}"
         if role_memory_content:
-            msg += f"\n\n角色记忆已加载到当前上下文{role_memory_content}"
+            msg += f"\n\n角色记忆已加载{role_memory_content}"
         msg += plugins_info
-        msg += "\n\n💡 提示：本能信息（教训、成功经验）会自动注入，无需角色记忆时请切换回无角色状态。"
+        msg += "\n\n💡 提示：本能信息（教训、成功经验）会自动注入，无需角色时切换回无角色状态。"
 
         # 返回角色描述供 AgentCore 注入系统提示词
         agent._current_role_description = role_desc
