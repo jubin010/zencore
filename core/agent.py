@@ -430,6 +430,8 @@ class AgentCore:
 
 当认为当前角色不足以完成任务时，可调用 switch_role 切换到更合适的角色。
 
+完成任务后，应调用 `switch_role("_main_profile")` 切回主角色，继续与用户直接对话。
+
 ## 插件索引
 
 {plugins_info}
@@ -487,7 +489,8 @@ class AgentCore:
 
                 name = role_dir.name
                 title = ""
-                capability = ""
+                description_lines = []
+                in_description = False
 
                 for i, line in enumerate(lines_content):
                     line_stripped = line.strip()
@@ -495,20 +498,27 @@ class AgentCore:
                         title = line_stripped[2:].split("（")[0].split("(")[0].strip()
                     elif i == 1 and not title:
                         title = line_stripped
-                    elif i == 2 and not capability:
-                        capability = line_stripped[:60]
-                    elif "擅长" in line and i >= 1:
-                        capability = line_stripped[:60]
-                        break
+                        in_description = True
+                        description_lines.append(line_stripped)
+                    elif in_description:
+                        if line_stripped.startswith("## ") or line_stripped.startswith(
+                            "#"
+                        ):
+                            break
+                        elif line_stripped:
+                            description_lines.append(line_stripped)
+                        else:
+                            break
 
-                role_entries.append(f"| {name} | {title} | {capability[:40]} |")
+                description = " ".join(description_lines[:2])
+                role_entries.append(f"| {name} | {title} | {description[:50]} |")
             except Exception as e:
                 role_entries.append(f"| {role_dir.name} | (读取失败) | |")
 
         if not role_entries:
             return "（暂无预设角色，可用 switch_role 创建新角色）"
 
-        header = "| 角色 | 标题 | 擅长 |\n|------|------|------|"
+        header = "| 角色 | 标题 | 描述 |\n|------|------|------|"
         return header + "\n" + "\n".join(role_entries)
 
     def chat(self, message: str) -> str:
