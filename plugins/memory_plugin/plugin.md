@@ -78,3 +78,4 @@
 | global_wins | 始终 | 全局成功经验 |
 | role_lessons | 有角色时 | 当前角色专属教训 |
 | role_wins | 有角色时 | 当前角色专属成功经验 |
+| user_profile | 始终 | 用户特征（对话中感知到用户偏好后，用 append_file 追加到 user_profile.md） |

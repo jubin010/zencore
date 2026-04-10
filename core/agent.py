@@ -424,6 +424,8 @@ class AgentCore:
 
 **直接回答**：当直接回答用户时，直接返回文字内容即可
 
+**用户画像**（感知到用户特征时，用 append_file 追加到 `plugins/memory_plugin/user_profile.md`）
+
 ## 可用角色
 
 {roles_info}

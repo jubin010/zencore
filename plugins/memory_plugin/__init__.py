@@ -13,6 +13,7 @@ from datetime import datetime
 MEMORY_FILE = Path(__file__).parent / "memory.md"
 LESSONS_FILE = Path(__file__).parent / "lessons.md"
 WINS_FILE = Path(__file__).parent / "wins.md"
+USER_PROFILE_FILE = Path(__file__).parent / "user_profile.md"
 
 GLOBAL_LESSONS = LESSONS_FILE
 GLOBAL_WINS = WINS_FILE
@@ -661,6 +662,19 @@ def register(agent):
                 return f"## {agent._current_role} 专属成功经验\n\n{content}"
         return ""
 
+    def user_profile_condition():
+        return True
+
+    def user_profile_prompt():
+        content = (
+            USER_PROFILE_FILE.read_text(encoding="utf-8").strip()
+            if USER_PROFILE_FILE.exists()
+            else ""
+        )
+        if content and "暂无" not in content:
+            return f"## 用户特征\n\n{content}"
+        return ""
+
     agent.instinct_registry.register(
         "global_lessons", global_lessons_condition, global_lessons_prompt
     )
@@ -671,6 +685,9 @@ def register(agent):
         "role_lessons", role_lessons_condition, role_lessons_prompt
     )
     agent.instinct_registry.register("role_wins", role_wins_condition, role_wins_prompt)
+    agent.instinct_registry.register(
+        "user_profile", user_profile_condition, user_profile_prompt
+    )
 
     return {
         "name": "memory_plugin",
