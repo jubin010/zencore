@@ -377,6 +377,7 @@ class AgentCore:
 
     def _build_prompt(self, user_message: str) -> str:
         plugins_info = self._get_plugins_info()
+        roles_info = self._get_roles_info()
         instincts = self.instinct_registry.evaluate()
         role_memory = self._load_role_memory()
         role_desc = getattr(self, "_current_role_description", "")
@@ -411,8 +412,23 @@ class AgentCore:
 
 ## 核心机制
 
-- 遇到工具报错：用 `append_file` 将教训追加到 `plugins/memory_plugin/lessons.md`
-- 当直接回答时，直接返回文字内容
+**教训记录**（工具报错时才记录）：
+```
+遇到工具报错时，用 append_file 将教训追加到 `plugins/memory_plugin/lessons.md`
+格式：`- 时间 | 工具: xxx | 错误: xxx | 修正: xxx`
+示例：`- 2026-04-10 | 工具: read_file | 错误: FileNotFoundError | 修正: 检查文件路径是否正确`
+```
+
+**成功经验**（不需要手动记录，由本能自动完成）：
+本能的 satisfaction 本能会在连续成功后自动记录
+
+**直接回答**：当直接回答用户时，直接返回文字内容即可
+
+## 可用角色
+
+{roles_info}
+
+当认为当前角色不足以完成任务时，可调用 switch_role 切换到更合适的角色。
 
 ## 插件索引
 
@@ -446,6 +462,54 @@ class AgentCore:
             except:
                 pass
         return "(插件注册表不存在)"
+
+    def _get_roles_info(self) -> str:
+        """动态生成角色能力索引"""
+        roles_dir = ROLES_DIR
+
+        if not roles_dir.exists():
+            return "(角色目录不存在)"
+
+        role_entries = []
+        for role_dir in sorted(roles_dir.iterdir()):
+            if not role_dir.is_dir():
+                continue
+            if role_dir.name.startswith("_"):
+                continue
+
+            role_file = role_dir / "role.md"
+            if not role_file.exists():
+                continue
+
+            try:
+                content = role_file.read_text(encoding="utf-8")
+                lines_content = content.split("\n")
+
+                name = role_dir.name
+                title = ""
+                capability = ""
+
+                for i, line in enumerate(lines_content):
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("# "):
+                        title = line_stripped[2:].split("（")[0].split("(")[0].strip()
+                    elif i == 1 and not title:
+                        title = line_stripped
+                    elif i == 2 and not capability:
+                        capability = line_stripped[:60]
+                    elif "擅长" in line and i >= 1:
+                        capability = line_stripped[:60]
+                        break
+
+                role_entries.append(f"| {name} | {title} | {capability[:40]} |")
+            except Exception as e:
+                role_entries.append(f"| {role_dir.name} | (读取失败) | |")
+
+        if not role_entries:
+            return "（暂无预设角色，可用 switch_role 创建新角色）"
+
+        header = "| 角色 | 标题 | 擅长 |\n|------|------|------|"
+        return header + "\n" + "\n".join(role_entries)
 
     def chat(self, message: str) -> str:
         self.add_message("user", message)
