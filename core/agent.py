@@ -602,14 +602,17 @@ class AgentCore:
             )
             content = self._sanitize_text(result.get("content", ""))
             tool_calls = result.get("tool_calls", [])
+            thinking = result.get("thinking", "")
+
+            # 有 thinking 时发送到 TUI 显示
+            if thinking and on_tool_result:
+                on_tool_result(("thinking", thinking))
 
             # 无工具调用 → 直接返回
             if not tool_calls:
                 # Ollama thinking 模式有时把回复放到 thinking 字段
-                if not content:
-                    thinking = result.get("thinking", "")
-                    if thinking:
-                        content = self._sanitize_text(thinking)
+                if not content and thinking:
+                    content = self._sanitize_text(thinking)
                 self.add_message("assistant", content)
                 return content
 

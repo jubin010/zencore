@@ -567,13 +567,25 @@ class ChatUI(App):
         return datetime.now().strftime("%H:%M")
 
     def _format_msg(self, role: str, content: str, border_color: str = None):
-        color_map = {"AI": "cyan", "👤": "red", "🔧工具": "yellow", "🧠本能": "magenta"}
-        icon_map = {"AI": "🤖", "👤": "👤", "🔧工具": "🔧", "🧠本能": "🧠"}
+        color_map = {
+            "AI": "cyan",
+            "👤": "red",
+            "🔧工具": "yellow",
+            "🧠本能": "magenta",
+            "💭思考": "blue",
+        }
+        icon_map = {
+            "AI": "🤖",
+            "👤": "👤",
+            "🔧工具": "🔧",
+            "🧠本能": "🧠",
+            "💭思考": "💭",
+        }
         icon = icon_map.get(role, "🤖")
         timestamp = self._format_time()
         color = color_map.get(role, "cyan")
         border_color = border_color or ("cyan" if role == "AI" else "red")
-        title_icon = "" if role in ("🔧工具", "🧠本能", "👤") else icon
+        title_icon = "" if role in ("🔧工具", "🧠本能", "👤", "💭思考") else icon
         title = Text.from_markup(f"[{color}]{title_icon}{role} [dim]{timestamp}[/dim]")
 
         if role == "🔧工具":
@@ -612,6 +624,21 @@ class ChatUI(App):
                     if self._render_mode and self._msg_log:
                         self._msg_log.write(
                             self._format_msg("🧠本能", content, border_color="magenta")
+                        )
+                elif role == "thinking":
+                    display_content = (
+                        content[:2000] + "\n... (已截断)"
+                        if len(content) > 2000
+                        else content
+                    )
+                    self._plain_messages.append(
+                        f"[{self._format_time()}] 💭 思考\n{display_content}"
+                    )
+                    if self._render_mode and self._msg_log:
+                        self._msg_log.write(
+                            self._format_msg(
+                                "💭思考", display_content, border_color="blue"
+                            )
                         )
                 else:
                     self._plain_messages.append(
