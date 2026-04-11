@@ -772,6 +772,7 @@ class AIClient:
         self.thinking_mgr = thinking_mgr
         self.thinking_interval = 60
         self.last_input_time = time.time()
+        self.is_processing = False
 
     def sanitize(self, text: str) -> str:
         if not text:
@@ -781,6 +782,7 @@ class AIClient:
         return text
 
     def handle_message(self, role: str, content: str):
+        self.is_processing = True
         try:
             self.agent.driver._silent = True
             response = self.agent.chat_with_tools(
@@ -796,9 +798,13 @@ class AIClient:
             self.server.ai_send(f"出错: {e}")
         finally:
             self.agent.driver._silent = False
+            self.is_processing = False
 
     def do_thinking(self):
         if not self.thinking_mgr or not self.server.thinking_enabled:
+            return
+
+        if self.is_processing:
             return
 
         try:
