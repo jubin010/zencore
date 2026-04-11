@@ -421,13 +421,11 @@ class SendTextArea(TextArea):
         self._completion_matches = []
         self._completion_prefix = ""
         self._server = server
-        self._last_text_len = 0
         super().__init__(**kwargs)
 
     def watch_text(self, value: str) -> None:
-        if self._server and len(value) > self._last_text_len:
+        if self._server and len(value) > 0:
             self._server.reset_activity_timer()
-        self._last_text_len = len(value)
 
     async def _on_key(self, event: events.Key) -> None:
         if self._server:
@@ -450,7 +448,6 @@ class SendTextArea(TextArea):
             text = self.text.strip()
             if text:
                 self.text = ""
-                self._last_text_len = 0
                 self.post_message(self._Submit(text))
             return
 
