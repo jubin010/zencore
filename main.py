@@ -855,8 +855,8 @@ class AIClient:
                         self.agent.driver._silent = False
 
                     self.server.ai_send(f"[{title}] {reply}")
-                    self.thinking_mgr.transition_to_idle()
                     self.last_input_time = time.time()
+                    self.thinking_mgr.transition_to_idle()
         except Exception as e:
             self.server.ai_send(f"思考出错: {e}")
 
