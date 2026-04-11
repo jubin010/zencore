@@ -425,10 +425,9 @@ class SendTextArea(TextArea):
         super().__init__(**kwargs)
 
     def watch_text(self, value: str) -> None:
-        if self._server:
+        if self._server and len(value) > 0:
             self._server.input_text = value
-            if len(value) > 0:
-                self._server.reset_activity_timer()
+            self._server.reset_activity_timer()
 
     async def _on_key(self, event: events.Key) -> None:
         if event.key == "ctrl+j":
@@ -813,6 +812,7 @@ class AIClient:
         finally:
             self.agent.driver._silent = False
             self.is_processing = False
+            self.server.input_text = ""
 
     def do_thinking(self):
         if not self.thinking_mgr or not self.server.thinking_enabled:
