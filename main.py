@@ -374,6 +374,7 @@ class Server:
     def __init__(self):
         self.human_queue = queue.Queue()
         self.ai_queue = queue.Queue()
+        self.activity_queue = queue.Queue()
         self.running = False
         self.thinking_enabled = False
 
@@ -405,19 +406,33 @@ class Server:
         except queue.Empty:
             return None
 
+    def reset_activity_timer(self):
+        if self.running:
+            self.activity_queue.put(True)
+
 
 class SendTextArea(TextArea):
     """TextArea 子类：Enter 发送，Ctrl+J 换行，右箭头命令补全"""
 
     COMMANDS = ["/list", "/select", "/clear", "/quit", "/render", "/thinking"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, server=None, **kwargs):
         self._completion_idx = -1
         self._completion_matches = []
         self._completion_prefix = ""
+        self._server = server
+        self._last_text_len = 0
         super().__init__(**kwargs)
 
+    def watch_text(self, value: str) -> None:
+        if self._server and len(value) > self._last_text_len:
+            self._server.reset_activity_timer()
+        self._last_text_len = len(value)
+
     async def _on_key(self, event: events.Key) -> None:
+        if self._server:
+            self._server.reset_activity_timer()
+
         if event.key == "ctrl+j":
             event.prevent_default()
             event.stop()
@@ -435,6 +450,7 @@ class SendTextArea(TextArea):
             text = self.text.strip()
             if text:
                 self.text = ""
+                self._last_text_len = 0
                 self.post_message(self._Submit(text))
             return
 
@@ -544,6 +560,7 @@ class ChatUI(App):
         self._thinking_enabled = server.thinking_enabled
         self._plain_messages = []
         self._msg_log = None
+        self._last_input_text_len = 0
 
     def compose(self) -> ComposeResult:
         yield Static("\n".join(self.initial_messages), id="header")
@@ -552,7 +569,7 @@ class ChatUI(App):
             TextArea(id="msg-text", read_only=True, show_line_numbers=False),
             id="messages",
         )
-        yield SendTextArea(id="input-box", show_line_numbers=False)
+        yield SendTextArea(id="input-box", show_line_numbers=False, server=server)
 
     def on_mount(self):
         self._msg_log = self.query_one("#msg-log", RichLog)
@@ -808,6 +825,13 @@ class AIClient:
             return
 
         try:
+            while True:
+                try:
+                    self.server.activity_queue.get_nowait()
+                    self.last_input_time = time.time()
+                except queue.Empty:
+                    break
+
             state = self.thinking_mgr.state
             if hasattr(state, "value") and state.value == "idle":
                 elapsed = time.time() - self.last_input_time
