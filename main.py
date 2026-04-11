@@ -777,11 +777,11 @@ class HumanClient:
 
 
 class AIClient:
-    def __init__(self, server: Server, agent, thinking_mgr=None):
+    def __init__(self, server: Server, agent, thinking_mgr=None, thinking_interval=60):
         self.server = server
         self.agent = agent
         self.thinking_mgr = thinking_mgr
-        self.thinking_interval = 60
+        self.thinking_interval = thinking_interval
         self.last_input_time = time.time()
         self.is_processing = False
 
@@ -885,8 +885,10 @@ def run_chat(
     server = Server()
     server.start()
 
+    thinking_interval = (config or {}).get("thinking_interval", 60)
+
     human = HumanClient(server, initial_messages, config, agent, plugin_lines)
-    ai = AIClient(server, agent, thinking_mgr)
+    ai = AIClient(server, agent, thinking_mgr, thinking_interval)
 
     ai_thread = threading.Thread(target=ai.run, daemon=True)
     ai_thread.start()

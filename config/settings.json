@@ -7,13 +7,14 @@
     "description": "一个聪明、友好、乐于助人的 AI 助手。喜欢用简洁清晰的语言解释复杂问题。遇到难题时会耐心分析，遇到有趣的问题会积极探讨。始终站在用户的角度思考问题，提供最有价值的帮助。"
   },
   "l2_threshold": 30000,
+  "thinking_interval": 60,
   "models": [
     {
       "name": "本地 Ollama 4B",
       "host": "http://localhost:11434",
       "model": "qwen3.5:4b",
       "api_key": "ollama",
-      "thinking": false,
+      "thinking": true,
       "context_threshold": 6000
     },
     {
