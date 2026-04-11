@@ -563,7 +563,7 @@ class ChatUI(App):
             TextArea(id="msg-text", read_only=True, show_line_numbers=False),
             id="messages",
         )
-        yield SendTextArea(id="input-box", show_line_numbers=False, server=server)
+        yield SendTextArea(id="input-box", show_line_numbers=False, server=self.server)
 
     def on_mount(self):
         self._msg_log = self.query_one("#msg-log", RichLog)
