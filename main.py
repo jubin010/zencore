@@ -425,9 +425,7 @@ class SendTextArea(TextArea):
         super().__init__(**kwargs)
 
     def watch_text(self, value: str) -> None:
-        if self._server and len(value) > 0:
-            self._server.input_text = value
-            self._server.reset_activity_timer()
+        pass
 
     async def _on_key(self, event: events.Key) -> None:
         if event.key == "ctrl+j":
@@ -575,6 +573,13 @@ class ChatUI(App):
             self._msg_log.write(line + "\n")
         self.query_one("#input-box", SendTextArea).focus()
         self.set_interval(0.1, self._poll_ai_messages)
+        self.set_interval(0.5, self._sync_input_activity)
+
+    def _sync_input_activity(self):
+        input_box = self.query_one("#input-box", SendTextArea)
+        if len(input_box.text) > 0:
+            self.server.input_text = input_box.text
+            self.server.reset_activity_timer()
 
     def _format_time(self):
         return datetime.now().strftime("%H:%M")
