@@ -22,19 +22,36 @@ from rich.console import Console
 from rich.text import Text
 from rich.panel import Panel
 from rich import box as box_type
+from rich.default_styles import DEFAULT_STYLES
 from textual.app import App, ComposeResult
-from textual.widgets import RichLog, Static
+from textual.widgets import RichLog, Static, LoadingIndicator
+from textual.containers import Vertical, Horizontal
 from textual.widgets._text_area import TextArea
 from textual.containers import Vertical
 from textual.message import Message
 from textual import events
 
+DEFAULT_STYLES["markdown.paragraph"] = "#ebdbb2"
+DEFAULT_STYLES["markdown.text"] = "#ebdbb2"
+DEFAULT_STYLES["markdown.h1"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.h2"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.h3"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.h4"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.h5"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.h6"] = "bold #fabd2f"
+DEFAULT_STYLES["markdown.strong"] = "bold #ebdbb2"
+DEFAULT_STYLES["markdown.em"] = "italic #ebdbb2"
+DEFAULT_STYLES["markdown.block_quote"] = "#a89984 italic"
+DEFAULT_STYLES["markdown.list"] = "#ebdbb2"
+DEFAULT_STYLES["markdown.link"] = "#83a598"
+DEFAULT_STYLES["markdown.link_url"] = "#83a598 underline"
+
+console = Console()
+
 AGENT_CORE_DIR = Path(__file__).parent
 sys.path.insert(0, str(AGENT_CORE_DIR))
 
 from core.agent import AgentCore
-
-console = Console()
 
 
 def sanitize(text: str) -> str:
@@ -80,7 +97,7 @@ def list_models(config: dict):
 
         if is_active:
             line = Text.from_markup(
-                f"[cyan]▶[/cyan] [bold cyan][{i}][/bold cyan] {thinking} [white]{name}[/white] ([dim]{model}[/dim])"
+                f"[#8ec07c]▶[/#8ec07c] [bold #8ec07c][{i}][/bold #8ec07c] {thinking} [white]{name}[/white] ([dim]{model}[/dim])"
             )
         else:
             line = Text.from_markup(
@@ -93,7 +110,7 @@ def list_models(config: dict):
         Panel(
             content,
             title="🔌 模型列表",
-            border_style="cyan",
+            border_style="#8ec07c",
             box=box_type.ROUNDED,
             padding=0,
         )
@@ -378,6 +395,7 @@ class Server:
         self.running = False
         self.thinking_enabled = False
         self.input_text = ""
+        self.is_processing = False
 
     def start(self):
         self.running = True
@@ -423,6 +441,7 @@ class SendTextArea(TextArea):
         self._completion_prefix = ""
         self._server = server
         super().__init__(**kwargs)
+        self.highlight_cursor_line = False
 
     def watch_text(self, value: str) -> None:
         pass
@@ -484,55 +503,72 @@ class SendTextArea(TextArea):
 
 class ChatUI(App):
     CSS = """
+    /* Gruvbox Dark theme */
     Screen {
-        background: #000000;
+        background: #282828;
     }
     #header {
         height: 5;
         margin: 0 1;
-        background: #000000;
-        border: solid #ffffff;
+        background: #282828;
+        border: solid #a89984;
     }
     #messages {
         height: 1fr;
         margin: 0 1;
-        background: #000000;
+        background: #282828;
     }
     #messages Vertical {
         height: 100%;
     }
     #msg-log {
         height: 100%;
-        background: #000000;
-        border: solid #ffffff;
-        scrollbar-color: #ffffff #000000;
-        scrollbar-background: #000000;
+        background: #282828;
+        border: solid #a89984;
+        scrollbar-color: #a89984 #282828;
+        scrollbar-background: #282828;
     }
     #msg-log:focus {
-        background: #000000;
+        background: #282828;
     }
     #msg-text {
         height: 100%;
-        background: #000000;
-        border: solid #ffffff;
+        background: #282828;
+        border: solid #a89984;
     }
     #msg-text TextArea {
-        color: #ffffff;
-        background: #000000;
-        scrollbar-color: #ffffff #000000;
-        scrollbar-background: #000000;
+        color: #ebdbb2;
+        background: #282828;
+        scrollbar-color: #a89984 #282828;
+        scrollbar-background: #282828;
     }
     #input-box {
         height: 6;
         margin: 0 1;
-        border: solid #ffffff;
-        background: #000000;
+        border: solid #a89984;
+        background: #282828;
     }
     #input-box SendTextArea {
-        color: #ffffff;
+        color: #ebdbb2;
+        background: #282828;
+    }
+    #input-box Input {
+        color: #ebdbb2;
+        background: #282828;
     }
     Static {
-        color: #aaaaaa;
+        color: #a89984;
+    }
+    #status-bar {
+        height: 1;
+        margin: 0 1;
+        background: #282828;
+    }
+    #status-bar LoadingIndicator {
+        width: 1;
+    }
+    #status-bar Static {
+        color: #ebdbb2;
     }
     """
 
@@ -555,6 +591,8 @@ class ChatUI(App):
         self._plain_messages = []
         self._msg_log = None
         self._last_input_text_len = 0
+        self._last_size = None
+        self._msg_meta = []
 
     def compose(self) -> ComposeResult:
         yield Static("\n".join(self.initial_messages), id="header")
@@ -564,9 +602,15 @@ class ChatUI(App):
             id="messages",
         )
         yield SendTextArea(id="input-box", show_line_numbers=False, server=self.server)
+        yield Horizontal(
+            LoadingIndicator(id="loading"),
+            Static("AI 推理中...", id="status-text"),
+            id="status-bar",
+        )
 
     def on_mount(self):
         self._msg_log = self.query_one("#msg-log", RichLog)
+        self._msg_log.min_width = 20
         msg_text = self.query_one("#msg-text", TextArea)
         msg_text.display = False
         for line in self.plugin_lines:
@@ -574,6 +618,18 @@ class ChatUI(App):
         self.query_one("#input-box", SendTextArea).focus()
         self.set_interval(0.1, self._poll_ai_messages)
         self.set_interval(0.5, self._sync_input_activity)
+        self.set_interval(0.3, self._update_loading_status)
+        self.set_interval(1, self._check_terminal_size)
+
+    def _update_loading_status(self):
+        loading = self.query_one("#loading", LoadingIndicator)
+        status_text = self.query_one("#status-text", Static)
+        if self.server.is_processing:
+            loading.display = True
+            status_text.display = True
+        else:
+            loading.display = False
+            status_text.display = False
 
     def _sync_input_activity(self):
         input_box = self.query_one("#input-box", SendTextArea)
@@ -583,16 +639,36 @@ class ChatUI(App):
         else:
             self.server.input_text = ""
 
+    def _check_terminal_size(self):
+        current_size = self.size
+        if self._last_size is None or self._last_size != current_size:
+            self._last_size = current_size
+            if self._msg_log:
+                self._msg_log.min_width = 20
+            if self._msg_log and self._msg_meta:
+                self._msg_log.clear()
+                for role, content, border in self._msg_meta:
+                    display_role = {
+                        "tool": "🔧工具",
+                        "reflex": "🧠本能",
+                        "thinking": "💭思考",
+                        "ai": "AI",
+                        "human": "👤",
+                    }.get(role, "AI")
+                    self._msg_log.write(
+                        self._format_msg(display_role, content, border_color=border)
+                    )
+
     def _format_time(self):
         return datetime.now().strftime("%H:%M")
 
     def _format_msg(self, role: str, content: str, border_color: str = None):
         color_map = {
-            "AI": "cyan",
-            "👤": "red",
-            "🔧工具": "yellow",
-            "🧠本能": "magenta",
-            "💭思考": "blue",
+            "AI": "#8ec07c",
+            "👤": "#fb4934",
+            "🔧工具": "#fabd2f",
+            "🧠本能": "#d3869b",
+            "💭思考": "#83a598",
         }
         icon_map = {
             "AI": "🤖",
@@ -603,8 +679,8 @@ class ChatUI(App):
         }
         icon = icon_map.get(role, "🤖")
         timestamp = self._format_time()
-        color = color_map.get(role, "cyan")
-        border_color = border_color or ("cyan" if role == "AI" else "red")
+        color = color_map.get(role, "#8ec07c")
+        border_color = border_color or ("#8ec07c" if role == "AI" else "#fb4934")
         title_icon = "" if role in ("🔧工具", "🧠本能", "👤", "💭思考") else icon
         title = Text.from_markup(f"[{color}]{title_icon}{role} [dim]{timestamp}[/dim]")
 
@@ -612,10 +688,10 @@ class ChatUI(App):
             from rich.text import Text as RText
 
             lines = content.split("\n")
-            styled_lines = [RText(line, style="on #111111") for line in lines]
+            styled_lines = [RText(line, style="on #3c3836") for line in lines]
             renderable = RText("\n").join(styled_lines)
         else:
-            renderable = Markdown(content)
+            renderable = Markdown(content, code_theme="gruvbox-dark", style="#ebdbb2")
 
         panel = Panel(
             renderable,
@@ -636,15 +712,19 @@ class ChatUI(App):
                 if role == "tool":
                     self._plain_messages.append(f"[{self._format_time()}] 🔧 {content}")
                     if self._render_mode and self._msg_log:
-                        self._msg_log.write(
-                            self._format_msg("🔧工具", content, border_color="yellow")
+                        styled = self._format_msg(
+                            "🔧工具", content, border_color="#fabd2f"
                         )
+                        self._msg_meta.append(("tool", content, "#fabd2f"))
+                        self._msg_log.write(styled)
                 elif role == "reflex":
                     self._plain_messages.append(f"[{self._format_time()}] {content}")
                     if self._render_mode and self._msg_log:
-                        self._msg_log.write(
-                            self._format_msg("🧠本能", content, border_color="magenta")
+                        styled = self._format_msg(
+                            "🧠本能", content, border_color="#d3869b"
                         )
+                        self._msg_meta.append(("reflex", content, "#d3869b"))
+                        self._msg_log.write(styled)
                 elif role == "thinking":
                     display_content = (
                         content[:2000] + "\n... (已截断)"
@@ -655,17 +735,19 @@ class ChatUI(App):
                         f"[{self._format_time()}] 💭 思考\n{display_content}"
                     )
                     if self._render_mode and self._msg_log:
-                        self._msg_log.write(
-                            self._format_msg(
-                                "💭思考", display_content, border_color="blue"
-                            )
+                        styled = self._format_msg(
+                            "💭思考", display_content, border_color="#83a598"
                         )
+                        self._msg_meta.append(("thinking", display_content, "#83a598"))
+                        self._msg_log.write(styled)
                 else:
                     self._plain_messages.append(
                         f"[{self._format_time()}] AI: {content}"
                     )
                     if self._render_mode and self._msg_log:
-                        self._msg_log.write(self._format_msg("AI", content))
+                        styled = self._format_msg("AI", content)
+                        self._msg_meta.append(("ai", content, None))
+                        self._msg_log.write(styled)
             except queue.Empty:
                 break
 
@@ -680,7 +762,9 @@ class ChatUI(App):
             self._handle_command(text, msg_log)
         else:
             self._plain_messages.append(f"[{self._format_time()}] 👤: {text}")
-            msg_log.write(self._format_msg("👤", text))
+            styled = self._format_msg("👤", text)
+            self._msg_meta.append(("human", text, None))
+            msg_log.write(styled)
             self.server.human_send(text)
 
     def _handle_command(self, cmd: str, msg_log: RichLog):
@@ -715,6 +799,7 @@ class ChatUI(App):
         elif command == "/clear":
             msg_log.clear()
             self._plain_messages.clear()
+            self._msg_meta.clear()
         elif command == "/render":
             self._toggle_render_mode()
         elif command == "/thinking":
@@ -803,6 +888,7 @@ class AIClient:
 
     def handle_message(self, role: str, content: str):
         self.is_processing = True
+        self.server.is_processing = True
         try:
             self.agent.driver._silent = True
             response = self.agent.chat_with_tools(
@@ -819,6 +905,7 @@ class AIClient:
         finally:
             self.agent.driver._silent = False
             self.is_processing = False
+            self.server.is_processing = False
             self.server.input_text = ""
 
     def do_thinking(self):
@@ -859,6 +946,7 @@ class AIClient:
                         title = "Fun"
 
                     self.server.ai_send(f"[{title}] 思考中...")
+                    self.server.is_processing = True
 
                     self.agent.driver._silent = True
                     try:
@@ -866,12 +954,14 @@ class AIClient:
                         reply = self.sanitize(response) if response else "(无响应)"
                     finally:
                         self.agent.driver._silent = False
+                        self.server.is_processing = False
 
                     self.server.ai_send(f"[{title}] {reply}")
                     self.last_input_time = time.time()
                     self.thinking_mgr.transition_to_idle()
         except Exception as e:
             self.server.ai_send(f"思考出错: {e}")
+            self.server.is_processing = False
 
     def run(self):
         while self.server.running:
