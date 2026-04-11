@@ -26,13 +26,29 @@
       "context_threshold": 24000
     },
     {
+      "name": "本地 Ollama Gemma4 E4B",
+      "host": "http://localhost:11434",
+      "model": "gemma4:e4b",
+      "api_key": "ollama",
+      "thinking": true,
+      "context_threshold": 24000
+    },
+    {
+      "name": "本地 Ollama Gemma4 E2B",
+      "host": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "api_key": "ollama",
+      "thinking": true,
+      "context_threshold": 24000
+    },
+    {
       "name": "MiniMax M2.7",
       "host": "https://api.minimaxi.com/v1",
       "model": "MiniMax-M2.7",
       "api_key": "YOUR_API_KEY_HERE",
       "thinking": true,
       "thinking_mode": "reasoning_split",
-      "context_threshold": 24000
+      "context_threshold": 200000
     },
     {
       "name": "阿里 Qwen",

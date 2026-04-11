@@ -18,8 +18,6 @@ from datetime import datetime
 
 MEMORY_PLUGIN_DIR = Path(__file__).parent.parent / "memory_plugin"
 MEMORY_FILE = MEMORY_PLUGIN_DIR / "memory.md"
-LESSONS_FILE = MEMORY_PLUGIN_DIR / "lessons.md"
-WINS_FILE = MEMORY_PLUGIN_DIR / "wins.md"
 ROLES_DIR = Path(__file__).parent.parent / "roles"
 
 L2_CACHE_SECTION = "## L2 缓存区\n"
@@ -285,72 +283,26 @@ def register(agent):
 
     agent.instinct_registry.register("mild", mild_condition, mild_prompt)
 
-    # 3. 挫败本能：连续失败时产生困惑和焦虑 + 自动记录教训（反射）
+    # 3. 挫败本能：连续失败时产生困惑和焦虑
     def frustration_condition():
-        return getattr(agent, "_consecutive_failures", 0) >= 2
+        return getattr(agent, "_consecutive_failures", 0) >= 1
 
     def frustration_prompt():
         failures = getattr(agent, "_consecutive_failures", 0)
         return (
-            f"\n🧬 [本能：挫败] 连续 {failures} 次失败。"
+            f"\n🧬 [本能：挫败] 已失败 {failures} 次。"
             "你感到深深的困惑和焦虑，急需找到出路。"
+            "\n⚠️ 重要：必须记录失败教训！调用 append_file 工具记录到 memory_plugin/lessons.md，格式："
+            "\n| 工具 | 策略 | 错误 |"
+            "\n|------|------|------|"
+            "\n| xxx | 出错的操作 | 具体错误 |"
+            "\n记录失败教训有助于避免重复犯错，必须认真对待！"
         )
-
-    def frustration_reflex():
-        """自动记录最近一次失败的教训（语义压缩）"""
-        failures = getattr(agent, "_consecutive_failures", 0)
-        if failures < 2:
-            return None
-
-        history = agent.conversation_history
-        for msg in reversed(history):
-            if msg.get("role") == "tool" and msg.get("content", "").startswith(
-                "❌ [ERROR]"
-            ):
-                error_content = msg.get("content", "")
-
-                tool_name = "unknown"
-                error_type = "unknown"
-                error_detail = ""
-
-                for line in error_content.split("\n"):
-                    if "tool:" in line:
-                        tool_name = line.split("tool:")[1].strip().split("\n")[0]
-                    if "原因:" in line:
-                        raw = line.split("原因:")[1].strip()
-                        if ":" in raw:
-                            parts = raw.split(":", 1)
-                            error_type = parts[0].strip()
-                            error_detail = parts[1].strip()[:50]
-                        else:
-                            error_type = raw[:50]
-                            error_detail = ""
-                        break
-
-                if error_detail:
-                    lesson = f"- 工具: {tool_name} | 错误: {error_type}: {error_detail} | 修正: 待分析"
-                else:
-                    lesson = f"- 工具: {tool_name} | 错误: {error_type} | 修正: 待分析"
-
-                if LESSONS_FILE.exists():
-                    existing = LESSONS_FILE.read_text(encoding="utf-8")
-                    if lesson not in existing:
-                        LESSONS_FILE.write_text(
-                            existing + "\n" + lesson, encoding="utf-8"
-                        )
-                        return f"📝 自动记录教训: {tool_name} | {error_type}"
-                else:
-                    LESSONS_FILE.write_text(f"# 教训\n\n{lesson}\n", encoding="utf-8")
-                    return f"📝 创建教训: {tool_name}"
-                return None
-
-        return None
 
     agent.instinct_registry.register(
         "frustration",
         frustration_condition,
         frustration_prompt,
-        reflex=frustration_reflex,
     )
 
     # ========== 正反馈本能（多巴胺简化版） ==========
@@ -364,41 +316,17 @@ def register(agent):
         return (
             f"\n🧬 [本能：顺畅] 连续 {successes} 次成功。"
             "当前策略有效，保持节奏，继续复用成功路径。"
+            "\n💡 提示：如遇到有价值的成功经验，可调用 append_file 工具记录到 memory_plugin/wins.md，格式："
+            "\n| 工具 | 策略 | 结果 |"
+            "\n|------|------|------|"
+            "\n| xxx | 具体做法 | 效果 |"
+            "\n注意避免重复记录相同案例。"
         )
-
-    def satisfaction_reflex():
-        """自动记录最近一次成功的经验"""
-        successes = getattr(agent, "_consecutive_successes", 0)
-        if successes < 3:
-            return None
-
-        history = agent.conversation_history
-        for msg in reversed(history):
-            if msg.get("role") == "tool" and not msg.get("content", "").startswith(
-                "❌"
-            ):
-                tool_name = msg.get("name", "unknown")
-                result = msg.get("content", "")[:100]
-
-                win = f"- 工具: {tool_name} | 结果: {result} | 复用: 继续用此策略"
-
-                if WINS_FILE.exists():
-                    existing = WINS_FILE.read_text(encoding="utf-8")
-                    if win not in existing:
-                        WINS_FILE.write_text(existing + "\n" + win, encoding="utf-8")
-                        return f"📝 自动记录成功经验: {tool_name}"
-                else:
-                    WINS_FILE.write_text(f"# 成功经验\n\n{win}\n", encoding="utf-8")
-                    return f"📝 创建成功经验: {tool_name}"
-                return None
-
-        return None
 
     agent.instinct_registry.register(
         "satisfaction",
         satisfaction_condition,
         satisfaction_prompt,
-        reflex=satisfaction_reflex,
     )
 
     # 5. 遗忘本能：L2 缓存满了自动淘汰（反射）
