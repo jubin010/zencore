@@ -580,6 +580,8 @@ class ChatUI(App):
         if len(input_box.text) > 0:
             self.server.input_text = input_box.text
             self.server.reset_activity_timer()
+        else:
+            self.server.input_text = ""
 
     def _format_time(self):
         return datetime.now().strftime("%H:%M")
