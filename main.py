@@ -377,6 +377,7 @@ class Server:
         self.activity_queue = queue.Queue()
         self.running = False
         self.thinking_enabled = False
+        self.input_text = ""
 
     def start(self):
         self.running = True
@@ -424,8 +425,10 @@ class SendTextArea(TextArea):
         super().__init__(**kwargs)
 
     def watch_text(self, value: str) -> None:
-        if self._server and len(value) > 0:
-            self._server.reset_activity_timer()
+        if self._server:
+            self._server.input_text = value
+            if len(value) > 0:
+                self._server.reset_activity_timer()
 
     async def _on_key(self, event: events.Key) -> None:
         if event.key == "ctrl+j":
@@ -825,6 +828,9 @@ class AIClient:
                     self.last_input_time = time.time()
                 except queue.Empty:
                     break
+
+            if self.server.input_text:
+                self.last_input_time = time.time()
 
             state = self.thinking_mgr.state
             if hasattr(state, "value") and state.value == "idle":
