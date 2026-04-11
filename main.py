@@ -428,9 +428,6 @@ class SendTextArea(TextArea):
             self._server.reset_activity_timer()
 
     async def _on_key(self, event: events.Key) -> None:
-        if self._server:
-            self._server.reset_activity_timer()
-
         if event.key == "ctrl+j":
             event.prevent_default()
             event.stop()
