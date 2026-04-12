@@ -202,19 +202,20 @@ class AgentCore:
         AgentCore._global_instance = self
 
     def _create_main_profile(self):
-        """根据 config/profile 创建 _main_profile 角色"""
-        profile = self._profile
+        """初始化 _main_profile 角色（只在文件不存在时创建）"""
         main_role_dir = ROLES_DIR / "_main_profile"
         main_role_dir.mkdir(parents=True, exist_ok=True)
 
-        role_md = f"# {profile['name']}\n\n**性格**: {profile['personality']}\n\n{profile['description']}"
-        (main_role_dir / "role.md").write_text(role_md, encoding="utf-8")
-        (main_role_dir / "plugins.json").write_text("[]", encoding="utf-8")
+        role_file = main_role_dir / "role.md"
+        if not role_file.exists():
+            profile = self._profile
+            role_md = f"# {profile['name']}\n\n**性格**: {profile['personality']}\n\n{profile['description']}"
+            role_file.write_text(role_md, encoding="utf-8")
+            (main_role_dir / "plugins.json").write_text("[]", encoding="utf-8")
+        else:
+            role_md = role_file.read_text(encoding="utf-8")
 
-        # 保存主角色描述，永远不被专家角色覆盖
         self._main_profile_description = role_md
-
-        # 切换到主角色
         self._current_role = "_main_profile"
         self._current_role_description = role_md
 
