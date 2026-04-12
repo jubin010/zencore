@@ -1022,13 +1022,8 @@ def main():
     thinking_mgr = AIThinkingManager(agent, config)
     thinking_mgr.do_research()
 
-    profile = config.get("profile", {})
-    profile_name = profile.get("name", "助手")
-    profile_greeting = profile.get("greeting", "你好，有什么可以帮你的吗？")
-
     thinking_icon = " 🧠" if model_config.get("thinking") else ""
     startup_lines = [
-        f"👋 {profile_name}：{profile_greeting}",
         f"🤖 模型: {driver.model}{thinking_icon} ❌AI自主思考",
         "📋 /list /select <id> /clear /render /thinking /quit",
     ]

@@ -189,7 +189,6 @@ class AgentCore:
         self._profile = {
             "name": profile.get("name", "助手"),
             "personality": profile.get("personality", "聪明可靠"),
-            "greeting": profile.get("greeting", "你好，有什么可以帮你的吗？"),
             "description": profile.get("description", "一个乐于助人的 AI 助手。"),
         }
 
