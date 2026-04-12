@@ -77,17 +77,9 @@ def register(agent):
             else:
                 lines.append("  （无需额外插件）")
 
-        memory_file = role_dir / "memory.md"
-        if memory_file.exists():
-            lines.append("")
-            lines.append("## 记忆")
-            lines.append(memory_file.read_text(encoding="utf-8")[:500])
-
         return "\n".join(lines)
 
-    def create_role(
-        role_name: str, role_md: str, plugins_json: str = "[]", memory_md: str = ""
-    ) -> str:
+    def create_role(role_name: str, role_md: str, plugins_json: str = "[]") -> str:
         """
         创造新角色
 
@@ -95,7 +87,7 @@ def register(agent):
             role_name: 角色名
             role_md: 角色身份描述（Markdown）
             plugins_json: 该角色需要的插件列表（JSON 数组字符串）
-            memory_md: 初始记忆（Markdown）
+            plugins_json: 该角色需要的插件列表（JSON 数组字符串）
         """
         try:
             role_dir = ROLES_DIR / role_name
@@ -113,13 +105,6 @@ def register(agent):
                 json.dumps(plugins, ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
-            if memory_md:
-                (role_dir / "memory.md").write_text(memory_md, encoding="utf-8")
-            else:
-                (role_dir / "memory.md").write_text(
-                    f"# {role_name} 记忆\n\n（记忆为空）", encoding="utf-8"
-                )
-
             return f"✅ 角色 `{role_name}` 已创造"
         except Exception as e:
             return f"❌ 创造角色失败: {e}"
@@ -129,29 +114,17 @@ def register(agent):
         切换角色 — 按需加载，用完即释放
 
         流程：
-        1. 持久化当前角色记忆到 Disk（如果有）
-        2. 清空 L1（conversation_history），释放空间
-        3. 加载新角色记忆到 L1
-        4. 本能信息仍然持续注入（与角色无关）
+        1. 加载新角色的 role.md 作为身份描述
+        2. 本能信息仍然持续注入（与角色无关）
         """
         role_dir = ROLES_DIR / role_name
         if not role_dir.is_dir():
             return f"❌ 角色不存在: {role_name}"
 
-        # 1. 持久化当前角色的 working memory 到 Disk
-        # （当前对话中属于该角色的工作笔记，不包含本能注入的信息）
-        if agent._current_role and agent._current_role_memory_file:
-            _persist_role_working_memory(agent)
-
-        # 2. 加载新角色（不清空 L1 - 共享上下文）
+        # 1. 加载新角色
         agent._current_role = role_name
-        memory_file = role_dir / "role.md" / "memory.md"
-        if memory_file.exists():
-            agent._current_role_memory_file = str(memory_file)
-        else:
-            agent._current_role_memory_file = ""
 
-        # 3. 读取角色描述、插件清单和记忆
+        # 2. 读取角色描述、插件清单
         role_desc = ""
         role_file = role_dir / "role.md"
         if role_file.exists():
@@ -178,50 +151,15 @@ def register(agent):
                 if prev in sys.modules:
                     del sys.modules[f"plugins.{prev}"]
 
-        # 5. 加载角色记忆到 L1（作为系统上下文的一部分）
-        role_memory_content = ""
-        if memory_file.exists():
-            mem_content = memory_file.read_text(encoding="utf-8")
-            if mem_content and "（记忆为空）" not in mem_content:
-                role_memory_content = f"\n\n## 角色记忆\n\n{mem_content}"
-
         msg = f"✅ 已切换角色: {role_name}"
-        if role_desc:
-            msg += f"\n\n身份:\n{role_desc}"
-        if role_memory_content:
-            msg += f"\n\n角色记忆已加载{role_memory_content}"
-        msg += plugins_info
-        msg += "\n\n💡 提示：本能信息（教训、成功经验）会自动注入，无需角色时切换回无角色状态。"
+        if plugins_info:
+            msg += plugins_info
+        msg += '\n💡 提示：本能信息（教训、成功经验）会自动注入。任务完成后切换回主角色 `switch_role("_main_profile")`。'
 
         # 返回角色描述供 AgentCore 注入系统提示词
         agent._current_role_description = role_desc
 
         return msg
-
-    def _persist_role_working_memory(agent):
-        """将当前角色的 working memory 追加到 Disk"""
-        if not agent._current_role_memory_file:
-            return
-
-        memory_file = Path(agent._current_role_memory_file)
-        if not memory_file.exists():
-            return
-
-        # 从 conversation_history 中提取属于当前角色的工作笔记
-        # 这些是 AI 在当前角色下产生的新记忆
-        working_notes = []
-        for msg in agent.conversation_history:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role == "system" and content:
-                # 检查是否包含 "角色工作笔记" 标记
-                if "## 角色工作笔记" in content or "## Working Notes" in content:
-                    working_notes.append(content)
-
-        if working_notes:
-            existing = memory_file.read_text(encoding="utf-8")
-            new_content = existing + "\n\n## 工作笔记\n\n" + "\n\n".join(working_notes)
-            memory_file.write_text(new_content, encoding="utf-8")
 
     agent.add_tool(
         "list_roles",

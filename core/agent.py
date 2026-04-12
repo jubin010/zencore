@@ -179,9 +179,8 @@ class AgentCore:
         # 双重记忆架构
         # 本体记忆：全局、跨角色、长期有效（史密斯的底层代码）
         self._global_memory_file: str = str(PLUGINS_DIR / "memory_plugin" / "memory.md")
-        # 角色记忆：局部、单角色、任务周期有效（当前面具的工作笔记）
+        # 当前角色
         self._current_role: str = ""
-        self._current_role_memory_file: str = ""
         self._current_role_description: str = ""
         self._main_profile_description: str = ""
 
@@ -210,7 +209,6 @@ class AgentCore:
 
         role_md = f"# {profile['name']}\n\n**性格**: {profile['personality']}\n\n{profile['description']}"
         (main_role_dir / "role.md").write_text(role_md, encoding="utf-8")
-        (main_role_dir / "memory.md").write_text("", encoding="utf-8")
         (main_role_dir / "plugins.json").write_text("[]", encoding="utf-8")
 
         # 保存主角色描述，永远不被专家角色覆盖
@@ -218,7 +216,6 @@ class AgentCore:
 
         # 切换到主角色
         self._current_role = "_main_profile"
-        self._current_role_memory_file = str(main_role_dir / "memory.md")
         self._current_role_description = role_md
 
     def _load_core_plugins(self):
@@ -363,23 +360,10 @@ class AgentCore:
     def clear_history(self):
         self.conversation_history = []
 
-    def _load_role_memory(self) -> str:
-        """加载当前角色的记忆文件内容"""
-        if not self._current_role_memory_file:
-            return ""
-        mem_path = Path(self._current_role_memory_file)
-        if not mem_path.exists():
-            return ""
-        content = mem_path.read_text(encoding="utf-8").strip()
-        if not content or "（记忆为空）" in content:
-            return ""
-        return f"## 当前角色记忆\n\n{content}\n"
-
     def _build_prompt(self, user_message: str) -> str:
         plugins_info = self._get_plugins_info()
         roles_info = self._get_roles_info()
         instincts = self.instinct_registry.evaluate()
-        role_memory = self._load_role_memory()
         role_desc = getattr(self, "_current_role_description", "")
         main_profile_desc = getattr(self, "_main_profile_description", "")
 
@@ -412,15 +396,15 @@ class AgentCore:
 
 ## 核心机制
 
-**教训记录**（工具报错时才记录）：
-```
-遇到工具报错时，用 append_file 将教训追加到 `plugins/memory_plugin/lessons.md`
-格式：`- 时间 | 工具: xxx | 错误: xxx | 修正: xxx`
-示例：`- 2026-04-10 | 工具: read_file | 错误: FileNotFoundError | 修正: 检查文件路径是否正确`
-```
+**教训记录**（工具报错时由 AI 自主决策记录）：
+遇到工具报错时，可调用 append_file 将教训追加到 `plugins/memory_plugin/lessons.md`
+格式：`| 工具 | 策略 | 错误 |`
+示例：`| read_file | 读取文件 | 文件不存在: xxx |`
 
-**成功经验**（不需要手动记录，由本能自动完成）：
-本能的 satisfaction 本能会在连续成功后自动记录
+**成功经验**（由 AI 自主决策记录）：
+连续成功后，可调用 append_file 将成功经验追加到 `plugins/memory_plugin/wins.md`
+格式：`| 工具 | 策略 | 结果 |`
+示例：`| write_file | 写入配置 | ✅ 已写入: config/settings.json |`
 
 **直接回答**：当直接回答用户时，直接返回文字内容即可
 
@@ -441,8 +425,6 @@ class AgentCore:
 ## 当前状态
 
 {current_context}
-
-{role_memory}
 
 ## 本能注入
 
