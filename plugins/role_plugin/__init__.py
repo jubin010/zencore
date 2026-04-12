@@ -267,7 +267,6 @@ def register(agent):
 
 遇到以下情况时，可以考虑创建新角色：
 - **反复解决同类问题**：把经验固化为角色
-- **需要特定记忆**：存储用户偏好或任务上下文
 - **现有角色不够用**：按需创建
 
 **判断流程**：遇到问题 → list_roles() 查看现有角色 → 现有角色无法高效解决？→ create_role()
@@ -282,8 +281,7 @@ def register(agent):
 create_role(
     role_name="xxx",      # 简洁有力的名字
     role_md="xxx",        # 一句话描述身份
-    plugins_json="[]",    # 该角色需要的插件（可选）
-    memory_md=""          # 初始记忆（可选）
+    plugins_json="[]"     # 该角色需要的插件（可选）
 )
 ```"""
 
