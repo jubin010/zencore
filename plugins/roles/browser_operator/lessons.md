@@ -1,6 +1,6 @@
-# writer 教训
+# browser_operator 教训
 
-> writer角色专属教训
+> browser_operator角色专属教训
 
 （暂无教训，等待第一次犯错后自动记录）
 

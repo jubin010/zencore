@@ -1,4 +1,4 @@
-# secretary 成功经验
+# browser_operator 成功经验
 
 （暂无成功经验，等待第一次胜利后自动记录）
 
