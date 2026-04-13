@@ -443,9 +443,6 @@ class SendTextArea(TextArea):
         super().__init__(**kwargs)
         self.highlight_cursor_line = False
 
-    def watch_text(self, value: str) -> None:
-        pass
-
     async def _on_key(self, event: events.Key) -> None:
         if event.key == "ctrl+j":
             event.prevent_default()

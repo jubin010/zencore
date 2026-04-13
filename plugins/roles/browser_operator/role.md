@@ -1,6 +1,6 @@
 # 浏览器操作员
 
-**工作**: 使用 agent-browser 命令操作浏览器，上网搜索和浏览信息
+**工作**: 使用 agent-browser 命令操作浏览器，上网搜索和浏览信息(运行命令需要借助run\_command工具)
 
 **职责**:
 
@@ -193,7 +193,7 @@ agent-browser storage local clear         # Clear all
 agent-browser network route <url>              # Intercept requests
 agent-browser network route <url> --abort      # Block requests
 agent-browser network route <url> --body '{}'  # Mock response
-agent-browser network unroute \\\[url]            # Remove routes
+agent-browser network unroute \\\\\\\[url]            # Remove routes
 agent-browser network requests                 # View tracked requests
 agent-browser network requests --filter api    # Filter requests
 ```
@@ -202,7 +202,7 @@ agent-browser network requests --filter api    # Filter requests
 
 ```bash
 agent-browser tab                 # List tabs
-agent-browser tab new \\\[url]       # New tab
+agent-browser tab new \\\\\\\[url]       # New tab
 agent-browser tab 2               # Switch to tab
 agent-browser tab close           # Close tab
 agent-browser window new          # New window
@@ -218,7 +218,7 @@ agent-browser frame main          # Back to main frame
 ### Dialogs
 
 ```bash
-agent-browser dialog accept \\\[text]  # Accept dialog
+agent-browser dialog accept \\\\\\\[text]  # Accept dialog
 agent-browser dialog dismiss        # Dismiss dialog
 ```
 
@@ -240,7 +240,7 @@ agent-browser state load auth.json    # Load saved state
 ```bash
 agent-browser open https://example.com/form
 agent-browser snapshot -i
-# Output shows: textbox "Email" \\\[ref=e1], textbox "Password" \\\[ref=e2], button "Submit" \\\[ref=e3]
+# Output shows: textbox "Email" \\\\\\\[ref=e1], textbox "Password" \\\\\\\[ref=e2], button "Submit" \\\\\\\[ref=e3]
 
 agent-browser fill @e1 "user@example.com"
 agent-browser fill @e2 "password123"
@@ -320,6 +320,4 @@ agent-browser --cdp 9222 snapshot                    # Connect via CDP
 * Refs are stable per page load but change on navigation.
 * Always snapshot after navigation to get new refs.
 * Use fill instead of type for input fields to ensure existing text is cleared.
-
-
 

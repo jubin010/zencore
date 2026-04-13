@@ -410,13 +410,19 @@ class AgentCore:
 
 **用户画像**（感知到用户特征时，用 append_file 追加到 `plugins/memory_plugin/user_profile.md`）
 
+## 角色分工
+
+**主角色（_main_profile）**：与用户沟通、汇报进度、闲聊 — 始终以主角色面对用户。
+
+**专家角色**：执行具体任务（如代码开发、文档整理、记忆检索等）。完成任务后立即切回主角色。
+
+切换规则：
+- 执行任务 → 切换专家角色（见下方可用角色列表）
+- 汇报或与用户沟通 → 必须切换回 `switch_role("_main_profile")`
+
 ## 可用角色
 
 {roles_info}
-
-当认为当前角色不足以完成任务时，可调用 switch_role 切换到更合适的角色。
-
-完成任务后，应调用 `switch_role("_main_profile")` 切回主角色，继续与用户直接对话。
 
 ## 插件索引
 
