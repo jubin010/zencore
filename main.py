@@ -13,6 +13,7 @@ import threading
 import queue
 import re
 import json
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -385,6 +386,60 @@ class AIThinkingManager:
 # ========== TUI 聊天系统 ==========
 
 
+class SessionDB:
+    """会话持久化 - sqlite3"""
+
+    def __init__(self):
+        self.db_file = AGENT_CORE_DIR / "sessions" / "conversation.db"
+        self.db_file.parent.mkdir(exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_file) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT,
+                    content TEXT,
+                    timestamp TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            """)
+            conn.commit()
+
+    def clear_db(self):
+        with sqlite3.connect(self.db_file) as conn:
+            conn.execute("DELETE FROM messages")
+            conn.commit()
+
+    def save_history(self, history: list):
+        with sqlite3.connect(self.db_file) as conn:
+            conn.execute("DELETE FROM messages")
+            for msg in history:
+                role = msg.get("role", "")
+                content = msg.get("content", "") or ""
+                tool_calls = msg.get("tool_calls")
+                if tool_calls:
+                    content = (
+                        f"[tool_calls]: {json.dumps(tool_calls, ensure_ascii=False)}"
+                    )
+                conn.execute(
+                    "INSERT INTO messages (role, content) VALUES (?, ?)",
+                    (role, content),
+                )
+            conn.commit()
+
+    def load_history(self) -> list:
+        history = []
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.execute("SELECT role, content FROM messages ORDER BY id")
+                for row in cursor:
+                    history.append({"role": row[0], "content": row[1]})
+        except Exception:
+            pass
+        return history
+
+
 class Server:
     """消息服务器：简单的队列广播"""
 
@@ -449,6 +504,13 @@ class SendTextArea(TextArea):
             event.stop()
             cursor = self.cursor_location
             self.replace("\n", cursor, cursor)
+            return
+
+        if event.key == "ctrl+q":
+            event.prevent_default()
+            event.stop()
+            self._server.stop()
+            self.app._shutdown()
             return
 
         if event.key == "right":
@@ -576,6 +638,7 @@ class ChatUI(App):
         config: dict = None,
         agent=None,
         plugin_lines: list = None,
+        session_db: SessionDB = None,
     ):
         super().__init__()
         self.server = server
@@ -583,6 +646,7 @@ class ChatUI(App):
         self.config = config or {}
         self.agent = agent
         self.plugin_lines = plugin_lines or []
+        self.session_db = session_db
         self._render_mode = True
         self._thinking_enabled = server.thinking_enabled
         self._plain_messages = []
@@ -612,6 +676,7 @@ class ChatUI(App):
         msg_text.display = False
         for line in self.plugin_lines:
             self._msg_log.write(line + "\n")
+        self._load_conversation()
         self.query_one("#input-box", SendTextArea).focus()
         self.set_interval(0.1, self._poll_ai_messages)
         self.set_interval(0.5, self._sync_input_activity)
@@ -770,7 +835,7 @@ class ChatUI(App):
         arg = parts[1] if len(parts) > 1 else ""
 
         if command == "/quit":
-            msg_log.write(self._format_system("退出中..."))
+            msg_log.write(self._format_system("会话已自动保存，退出中..."))
             self.server.stop()
             self.exit()
         elif command == "/list":
@@ -791,12 +856,34 @@ class ChatUI(App):
             self.config["active_model"] = idx
             model_config = get_active_model(self.config)
             self.agent.driver.switch_model(model_config)
-            msg_log.write(self._format_system(f"已切换到: {model_config['model']}"))
+
+            cleaned = []
+            for msg in self.agent.conversation_history:
+                if msg.get("role") == "user":
+                    cleaned.append(msg)
+                elif msg.get("role") == "assistant" and "tool_calls" not in msg:
+                    cleaned.append(msg)
+            self.agent.conversation_history = cleaned
+
+            msg_log.clear()
+            self._plain_messages.clear()
+            self._msg_meta.clear()
+            if self.session_db:
+                self.session_db.clear_db()
+            msg_log.write(
+                self._format_system(
+                    f"已切换到: {model_config['model']}，工具调用历史已清空"
+                )
+            )
             self._update_header(model_config)
         elif command == "/clear":
             msg_log.clear()
             self._plain_messages.clear()
             self._msg_meta.clear()
+            self.agent.conversation_history.clear()
+            if self.session_db:
+                self.session_db.clear_db()
+            msg_log.write(self._format_system("已清空当前会话和保存的会话历史"))
         elif command == "/render":
             self._toggle_render_mode()
         elif command == "/thinking":
@@ -839,6 +926,35 @@ class ChatUI(App):
 
         self._render_mode = not self._render_mode
 
+    def _load_conversation(self):
+        if not self.session_db:
+            return
+        try:
+            history = self.session_db.load_history()
+            if history:
+                self.agent.conversation_history = history
+                self._rebuild_ui_from_history(history)
+                print(f"📜 已恢复 {len(history)} 条对话历史")
+        except Exception as e:
+            print(f"恢复会话失败: {e}")
+
+    def _rebuild_ui_from_history(self, history):
+        for msg in history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                plain = f"[{self._format_time()}] 👤: {content}"
+                self._plain_messages.append(plain)
+                styled = self._format_msg("👤", content)
+                self._msg_meta.append(("human", content, None))
+                self._msg_log.write(styled)
+            elif role == "assistant" and content:
+                plain = f"[{self._format_time()}] 🤖 {content}"
+                self._plain_messages.append(plain)
+                styled = self._format_msg("AI", content)
+                self._msg_meta.append(("ai", content, None))
+                self._msg_log.write(styled)
+
     def _update_header(self, model_config=None):
         if model_config is None:
             model_config = self.agent.driver.model_config if self.agent.driver else {}
@@ -859,22 +975,33 @@ class HumanClient:
         config: dict = None,
         agent=None,
         plugin_lines: list = None,
+        session_db: SessionDB = None,
     ):
         self.server = server
-        self.app = ChatUI(server, initial_messages, config, agent, plugin_lines)
+        self.app = ChatUI(
+            server, initial_messages, config, agent, plugin_lines, session_db
+        )
 
     def run(self):
         self.app.run()
 
 
 class AIClient:
-    def __init__(self, server: Server, agent, thinking_mgr=None, thinking_interval=60):
+    def __init__(
+        self,
+        server: Server,
+        agent,
+        thinking_mgr=None,
+        thinking_interval=60,
+        session_db: SessionDB = None,
+    ):
         self.server = server
         self.agent = agent
         self.thinking_mgr = thinking_mgr
         self.thinking_interval = thinking_interval
         self.last_input_time = time.time()
         self.is_processing = False
+        self.session_db = session_db
 
     def sanitize(self, text: str) -> str:
         if not text:
@@ -893,6 +1020,9 @@ class AIClient:
             )
             reply = self.sanitize(response) if response else "(无响应)"
             self.server.ai_send(reply)
+
+            if self.session_db:
+                self.session_db.save_history(self.agent.conversation_history)
 
             if self.thinking_mgr:
                 self.thinking_mgr.transition_to_idle()
@@ -956,6 +1086,8 @@ class AIClient:
                     self.server.ai_send(f"[{title}] {reply}")
                     self.last_input_time = time.time()
                     self.thinking_mgr.transition_to_idle()
+                    if self.session_db:
+                        self.session_db.save_history(self.agent.conversation_history)
         except Exception as e:
             self.server.ai_send(f"思考出错: {e}")
             self.server.is_processing = False
@@ -984,11 +1116,14 @@ def run_chat(
     """启动聊天系统"""
     server = Server()
     server.start()
+    session_db = SessionDB()
 
     thinking_interval = (config or {}).get("thinking_interval", 60)
 
-    human = HumanClient(server, initial_messages, config, agent, plugin_lines)
-    ai = AIClient(server, agent, thinking_mgr, thinking_interval)
+    human = HumanClient(
+        server, initial_messages, config, agent, plugin_lines, session_db
+    )
+    ai = AIClient(server, agent, thinking_mgr, thinking_interval, session_db)
 
     ai_thread = threading.Thread(target=ai.run, daemon=True)
     ai_thread.start()

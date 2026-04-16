@@ -501,7 +501,7 @@ class AgentCore:
                             break
 
                 description = " ".join(description_lines[:2])
-                role_entries.append(f"| {name} | {title} | {description[:50]} |")
+                role_entries.append(f"| {name} | {title} | {description} |")
             except Exception as e:
                 role_entries.append(f"| {role_dir.name} | (读取失败) | |")
 

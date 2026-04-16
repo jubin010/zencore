@@ -21,7 +21,7 @@
       "host": "http://localhost:11434",
       "model": "qwen3.5:9b",
       "api_key": "ollama",
-      "thinking": false,
+      "thinking": true,
       "context_threshold": 24000
     },
     {
