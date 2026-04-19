@@ -1020,9 +1020,10 @@ class ChatUI(App):
                         call_display = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
                         plain = f"[{self._format_time()}] {call_display}"
                         self._plain_messages.append(plain)
-                        styled = self._format_msg("🔧工具", call_display, border_color="#fabd2f")
-                        self._msg_meta.append(("tool", call_display, "#fabd2f"))
-                        self._msg_log.write(styled)
+                        if self._render_mode and self._msg_log:
+                            styled = self._format_msg("AI", call_display)
+                            self._msg_meta.append(("ai", call_display, None))
+                            self._msg_log.write(styled)
                 if content:
                     plain = f"[{self._format_time()}] AI: {content}"
                     self._plain_messages.append(plain)
