@@ -988,10 +988,13 @@ class ChatUI(App):
                 self._msg_meta.append(("human", content, None))
                 self._msg_log.write(styled)
             elif role == "tool":
-                plain = f"[{self._format_time()}] 🔧 {content}"
+                display_content = content
+                if len(content) > 300:
+                    display_content = content[:300] + "\n... (已截断)"
+                plain = f"[{self._format_time()}] 🔧 {display_content}"
                 self._plain_messages.append(plain)
-                styled = self._format_msg("🔧工具", content, border_color="#fabd2f")
-                self._msg_meta.append(("tool", content, "#fabd2f"))
+                styled = self._format_msg("🔧工具", display_content, border_color="#fabd2f")
+                self._msg_meta.append(("tool", display_content, "#fabd2f"))
                 self._msg_log.write(styled)
             elif role == "assistant":
                 if tool_calls:
