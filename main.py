@@ -401,6 +401,7 @@ class SessionDB:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT,
                     content TEXT,
+                    data TEXT,
                     timestamp TEXT DEFAULT (datetime('now', 'localtime'))
                 )
             """)
@@ -417,16 +418,10 @@ class SessionDB:
             for msg in history:
                 role = msg.get("role", "")
                 content = msg.get("content", "") or ""
-                if role == "assistant":
-                    content = re.sub(
-                        r"\[tool_calls\]:\s*\[.*?\]",
-                        "",
-                        content,
-                        flags=re.DOTALL
-                    ).strip()
+                msg_data = json.dumps(msg, ensure_ascii=False)
                 conn.execute(
-                    "INSERT INTO messages (role, content) VALUES (?, ?)",
-                    (role, content),
+                    "INSERT INTO messages (role, content, data) VALUES (?, ?, ?)",
+                    (role, content, msg_data),
                 )
             conn.commit()
 
@@ -434,18 +429,14 @@ class SessionDB:
         history = []
         try:
             with sqlite3.connect(self.db_file) as conn:
-                cursor = conn.execute("SELECT role, content FROM messages ORDER BY id")
+                cursor = conn.execute("SELECT data FROM messages ORDER BY id")
                 for row in cursor:
-                    role = row[0]
-                    content = row[1] or ""
-                    if role == "assistant":
-                        content = re.sub(
-                            r"\[tool_calls\]:\s*\[.*?\]",
-                            "",
-                            content,
-                            flags=re.DOTALL
-                        ).strip()
-                    history.append({"role": role, "content": content})
+                    if row[0]:
+                        try:
+                            msg = json.loads(row[0])
+                            history.append(msg)
+                        except json.JSONDecodeError:
+                            pass
         except Exception:
             pass
         return history
