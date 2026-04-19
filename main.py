@@ -979,26 +979,47 @@ class ChatUI(App):
             role = msg.get("role", "")
             content = msg.get("content", "") or ""
             tool_calls = msg.get("tool_calls")
+            tool_call_id = msg.get("tool_call_id", "")
+
             if role == "user":
                 plain = f"[{self._format_time()}] 👤: {content}"
                 self._plain_messages.append(plain)
                 styled = self._format_msg("👤", content)
                 self._msg_meta.append(("human", content, None))
                 self._msg_log.write(styled)
+            elif role == "tool":
+                plain = f"[{self._format_time()}] 🔧 {content}"
+                self._plain_messages.append(plain)
+                styled = self._format_msg("🔧工具", content, border_color="#fabd2f")
+                self._msg_meta.append(("tool", content, "#fabd2f"))
+                self._msg_log.write(styled)
             elif role == "assistant":
                 if tool_calls:
-                    tc_display = ", ".join([
-                        f"{tc.get('function', {}).get('name', 'unknown')}()"
-                        for tc in tool_calls
-                    ])
-                    display_content = f"[调用工具: {tc_display}]"
-                    plain = f"[{self._format_time()}] 🤖 {display_content}"
-                    self._plain_messages.append(plain)
-                    styled = self._format_msg("🤖", display_content)
-                    self._msg_meta.append(("ai", display_content, None))
-                    self._msg_log.write(styled)
+                    for tc in tool_calls:
+                        fn = tc.get("function", {})
+                        tool_name = fn.get("name", "unknown")
+                        args_str = fn.get("arguments", "{}")
+                        try:
+                            args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                        except:
+                            args_dict = {}
+                        args_list = []
+                        for k, v in args_dict.items():
+                            v_str = repr(v)
+                            if len(v_str) > 30:
+                                v_str = v_str[:30] + "..."
+                            args_list.append(f"{k}={v_str}")
+                        args_display = ", ".join(args_list)
+                        if len(args_display) > 100:
+                            args_display = args_display[:100] + "..."
+                        call_display = f"🔧 `{tool_name}`({args_display})"
+                        plain = f"[{self._format_time()}] {call_display}"
+                        self._plain_messages.append(plain)
+                        styled = self._format_msg("🔧工具", call_display, border_color="#fabd2f")
+                        self._msg_meta.append(("tool", call_display, "#fabd2f"))
+                        self._msg_log.write(styled)
                 if content:
-                    plain = f"[{self._format_time()}] 🤖 {content}"
+                    plain = f"[{self._format_time()}] AI: {content}"
                     self._plain_messages.append(plain)
                     styled = self._format_msg("AI", content)
                     self._msg_meta.append(("ai", content, None))
