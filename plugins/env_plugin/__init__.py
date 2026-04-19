@@ -206,12 +206,12 @@ def register(agent):
         except Exception as e:
             return f"❌ 搜索失败: {e}"
 
-    def run_command(command: str, timeout: int = 30, background: bool = None) -> str:
+    def run_command(command: str, timeout: int = 90, background: bool = None) -> str:
         """执行系统命令
 
         Args:
             command: 要执行的命令
-            timeout: 超时时间（秒），默认30秒
+            timeout: 超时时间（秒），默认90秒
             background: 是否后台运行。
                        None=自动检测（若是gui_programs中的程序则后台运行）
                        True=强制后台运行
