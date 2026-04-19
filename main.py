@@ -417,11 +417,13 @@ class SessionDB:
             for msg in history:
                 role = msg.get("role", "")
                 content = msg.get("content", "") or ""
-                tool_calls = msg.get("tool_calls")
-                if tool_calls:
-                    content = (
-                        f"[tool_calls]: {json.dumps(tool_calls, ensure_ascii=False)}"
-                    )
+                if role == "assistant":
+                    content = re.sub(
+                        r"\[tool_calls\]:\s*\[.*?\]",
+                        "",
+                        content,
+                        flags=re.DOTALL
+                    ).strip()
                 conn.execute(
                     "INSERT INTO messages (role, content) VALUES (?, ?)",
                     (role, content),
@@ -434,7 +436,16 @@ class SessionDB:
             with sqlite3.connect(self.db_file) as conn:
                 cursor = conn.execute("SELECT role, content FROM messages ORDER BY id")
                 for row in cursor:
-                    history.append({"role": row[0], "content": row[1]})
+                    role = row[0]
+                    content = row[1] or ""
+                    if role == "assistant":
+                        content = re.sub(
+                            r"\[tool_calls\]:\s*\[.*?\]",
+                            "",
+                            content,
+                            flags=re.DOTALL
+                        ).strip()
+                    history.append({"role": role, "content": content})
         except Exception:
             pass
         return history
