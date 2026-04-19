@@ -998,6 +998,8 @@ class ChatUI(App):
                     for tc in tool_calls:
                         fn = tc.get("function", {})
                         tool_name = fn.get("name", "unknown")
+                        tool_info = self.agent.tool_registry._tools.get(tool_name, {})
+                        plugin_name = tool_info.get("plugin", "?")
                         args_str = fn.get("arguments", "{}")
                         try:
                             args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
@@ -1012,7 +1014,7 @@ class ChatUI(App):
                         args_display = ", ".join(args_list)
                         if len(args_display) > 100:
                             args_display = args_display[:100] + "..."
-                        call_display = f"🔧 `{tool_name}`({args_display})"
+                        call_display = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
                         plain = f"[{self._format_time()}] {call_display}"
                         self._plain_messages.append(plain)
                         styled = self._format_msg("🔧工具", call_display, border_color="#fabd2f")
