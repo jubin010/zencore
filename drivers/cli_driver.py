@@ -65,6 +65,44 @@ def _parse_ollama_thinking_toolcalls(thinking: str) -> list:
     return tool_calls
 
 
+def _parse_tool_call_tags(text: str) -> list:
+    """从文本中解析 <tool_call>...</tool_call> 标签（llama.cpp 备用方案）"""
+    if not text:
+        return []
+
+    pattern = r"<tool_call>\s*<function=(\w+)[^>]*>(.*?)</tool_call>"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    tool_calls = []
+    for i, match in enumerate(matches):
+        func_name = match[0]
+        inner = match[1].strip()
+
+        param_pattern = r"<parameter=(\w+)>([^<]*)</parameter>"
+        param_matches = re.findall(param_pattern, inner)
+
+        arguments = {}
+        for pm in param_matches:
+            param_name = pm[0]
+            param_value = pm[1].strip()
+            arguments[param_name] = param_value
+
+        tool_calls.append(
+            {
+                "id": f"llama_tc_fallback_{i}_{id(text)}",
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False)
+                    if arguments
+                    else "{}",
+                },
+            }
+        )
+
+    return tool_calls
+
+
 class CLIDriver(DriverInterface):
     """命令行驱动（Rich 美化版）"""
 
@@ -368,6 +406,8 @@ class CLIDriver(DriverInterface):
                     console.print(Rule(style="dim"))
 
                 native_tool_calls = []
+                content = message.content if message.content else ""
+
                 if hasattr(message, "tool_calls") and message.tool_calls:
                     for tc in message.tool_calls:
                         native_tool_calls.append(
@@ -380,9 +420,14 @@ class CLIDriver(DriverInterface):
                                 },
                             }
                         )
+                else:
+                    parsed_tcs = _parse_tool_call_tags(content)
+                    if parsed_tcs:
+                        native_tool_calls = parsed_tcs
+                        content = re.sub(r"<tool_call>\s*<function=\w+[^>]*>.*?</tool_call>", "", content, flags=re.DOTALL)
 
                 return {
-                    "content": _sanitize(message.content) if message.content else "",
+                    "content": _sanitize(content),
                     "tool_calls": native_tool_calls,
                     "thinking": thinking,
                 }
