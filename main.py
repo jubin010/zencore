@@ -977,19 +977,32 @@ class ChatUI(App):
     def _rebuild_ui_from_history(self, history):
         for msg in history:
             role = msg.get("role", "")
-            content = msg.get("content", "")
+            content = msg.get("content", "") or ""
+            tool_calls = msg.get("tool_calls")
             if role == "user":
                 plain = f"[{self._format_time()}] 👤: {content}"
                 self._plain_messages.append(plain)
                 styled = self._format_msg("👤", content)
                 self._msg_meta.append(("human", content, None))
                 self._msg_log.write(styled)
-            elif role == "assistant" and content:
-                plain = f"[{self._format_time()}] 🤖 {content}"
-                self._plain_messages.append(plain)
-                styled = self._format_msg("AI", content)
-                self._msg_meta.append(("ai", content, None))
-                self._msg_log.write(styled)
+            elif role == "assistant":
+                if tool_calls:
+                    tc_display = ", ".join([
+                        f"{tc.get('function', {}).get('name', 'unknown')}()"
+                        for tc in tool_calls
+                    ])
+                    display_content = f"[调用工具: {tc_display}]"
+                    plain = f"[{self._format_time()}] 🤖 {display_content}"
+                    self._plain_messages.append(plain)
+                    styled = self._format_msg("🤖", display_content)
+                    self._msg_meta.append(("ai", display_content, None))
+                    self._msg_log.write(styled)
+                if content:
+                    plain = f"[{self._format_time()}] 🤖 {content}"
+                    self._plain_messages.append(plain)
+                    styled = self._format_msg("AI", content)
+                    self._msg_meta.append(("ai", content, None))
+                    self._msg_log.write(styled)
 
     def _update_header(self, model_config=None):
         if model_config is None:
