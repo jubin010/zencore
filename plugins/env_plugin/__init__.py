@@ -206,8 +206,38 @@ def register(agent):
         except Exception as e:
             return f"❌ 搜索失败: {e}"
 
-    def run_command(command: str, timeout: int = 30) -> str:
+    def run_command(command: str, timeout: int = 30, background: bool = None) -> str:
+        """执行系统命令
+
+        Args:
+            command: 要执行的命令
+            timeout: 超时时间（秒），默认30秒
+            background: 是否后台运行。
+                       None=自动检测（若是gui_programs中的程序则后台运行）
+                       True=强制后台运行
+                       False=强制同步运行
+        """
         try:
+            # 加载 gui_programs 配置
+            if background is None:
+                import json
+                config_file = AGENT_ROOT / "config" / "settings.json"
+                gui_programs = []
+                try:
+                    with open(config_file) as f:
+                        config = json.load(f)
+                        gui_programs = config.get("gui_programs", [])
+                except:
+                    pass
+
+                cmd_name = command.split()[0] if command else ""
+                cmd_base = cmd_name.split("/")[-1].split("\\")[-1]
+                background = cmd_base in gui_programs
+
+            if background:
+                subprocess.Popen(command, shell=True, cwd=os.getcwd())
+                return f"✅ 已后台启动: {command}"
+
             result = subprocess.run(
                 command,
                 shell=True,

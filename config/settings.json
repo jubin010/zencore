@@ -7,6 +7,7 @@
   },
   "l2_threshold": 30000,
   "thinking_interval": 60,
+  "gui_programs": ["feh", "gimp", "evince", "xdg-open", "open", "see", "display", "okular", "eog", "gwenview", "ristretto", "mirage", "nomacs"],
   "models": [
     {
       "name": "本地 llama.cpp Qwen3.6-35B",
