@@ -169,9 +169,8 @@ class AgentCore:
         self.tool_registry = ToolRegistry()
         self.instinct_registry = InstinctRegistry()
 
-        # 上下文
+        # 上下文（无硬性限制，由本能 crowding reflex 管理大小）
         self.conversation_history = []
-        self.max_history = self.config.get("max_history", 50)
 
         # 当前加载的非核心插件
         self._loaded_plugins: set = set()
@@ -354,8 +353,6 @@ class AgentCore:
         msg.update(kwargs)
 
         self.conversation_history.append(msg)
-        if len(self.conversation_history) > self.max_history:
-            self.conversation_history = self.conversation_history[-self.max_history :]
 
     def clear_history(self):
         self.conversation_history = []

@@ -857,6 +857,7 @@ class ChatUI(App):
             model_config = get_active_model(self.config)
             self.agent.driver.switch_model(model_config)
 
+            # 清除工具调用相关消息，保留普通对话
             cleaned = []
             for msg in self.agent.conversation_history:
                 if msg.get("role") == "user":
@@ -865,11 +866,30 @@ class ChatUI(App):
                     cleaned.append(msg)
             self.agent.conversation_history = cleaned
 
+            # 从 cleaned history 重建 UI
             msg_log.clear()
             self._plain_messages.clear()
             self._msg_meta.clear()
+            for msg in cleaned:
+                role = msg.get("role", "")
+                content = msg.get("content", "") or ""
+                if role == "user":
+                    plain = f"[{self._format_time()}] 👤: {content}"
+                    self._plain_messages.append(plain)
+                    styled = self._format_msg("👤", content)
+                    self._msg_meta.append(("human", content, None))
+                    msg_log.write(styled)
+                elif role == "assistant":
+                    plain = f"[{self._format_time()}] 🤖 {content}"
+                    self._plain_messages.append(plain)
+                    styled = self._format_msg("AI", content)
+                    self._msg_meta.append(("ai", content, None))
+                    msg_log.write(styled)
+
+            # sqlite 也同步更新
             if self.session_db:
-                self.session_db.clear_db()
+                self.session_db.save_history(cleaned)
+
             msg_log.write(
                 self._format_system(
                     f"已切换到: {model_config['model']}，工具调用历史已清空"

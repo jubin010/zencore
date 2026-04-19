@@ -9,6 +9,14 @@
   "thinking_interval": 60,
   "models": [
     {
+      "name": "本地 llama.cpp Qwen3.6-35B",
+      "host": "http://localhost:7777",
+      "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "api_key": "llama.cpp",
+      "thinking": false,
+      "context_threshold": 128000
+    },
+    {
       "name": "本地 Ollama 4B",
       "host": "http://localhost:11434",
       "model": "qwen3.5:4b",

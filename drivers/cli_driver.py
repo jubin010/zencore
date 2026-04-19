@@ -285,6 +285,108 @@ class CLIDriver(DriverInterface):
                     "thinking": thinking,
                 }
 
+            elif self.api_key.lower() == "llama.cpp":
+                extra_body = {"chat_template_kwargs": {}}
+                if self.thinking:
+                    extra_body["chat_template_kwargs"]["enable_thinking"] = True
+                    extra_body["chat_template_kwargs"]["thinking_language"] = "zh"
+                else:
+                    extra_body["chat_template_kwargs"]["enable_thinking"] = False
+                if self.thinking_mode and self.thinking_mode.startswith("extra_body:"):
+                    key, val = self.thinking_mode[len("extra_body:") :].split("=", 1)
+                    extra_body[key.strip()] = val.strip().lower() == "true"
+
+                processed_messages = []
+                for msg in messages:
+                    if msg.get("role") == "assistant" and "tool_calls" in msg:
+                        processed_tcs = []
+                        for tc in msg["tool_calls"]:
+                            fn = tc.get("function", {})
+                            args = fn.get("arguments", "{}")
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {}
+                            processed_tcs.append({
+                                "id": tc.get("id", f"llama_tc_{id(tc)}"),
+                                "type": "function",
+                                "function": {
+                                    "name": fn.get("name", ""),
+                                    "arguments": args,
+                                }
+                            })
+                        processed_messages.append({
+                            "role": "assistant",
+                            "content": msg.get("content") or "",
+                            "tool_calls": processed_tcs,
+                        })
+                    else:
+                        processed_messages.append(msg)
+
+                api_kwargs = {
+                    "model": self.model,
+                    "messages": processed_messages,
+                    "temperature": 0.7,
+                }
+                api_kwargs["extra_body"] = extra_body
+                if tools:
+                    api_kwargs["tools"] = tools
+
+                self.start_thinking()
+                try:
+                    response = client.chat.completions.create(**api_kwargs)
+                finally:
+                    self.stop_thinking()
+
+                message = response.choices[0].message
+
+                thinking = ""
+                if hasattr(message, "reasoning_details") and message.reasoning_details:
+                    parts = []
+                    for detail in message.reasoning_details:
+                        if isinstance(detail, dict) and "text" in detail:
+                            parts.append(detail["text"])
+                        elif hasattr(detail, "text"):
+                            parts.append(detail.text)
+                    thinking = "\n".join(parts)
+                elif hasattr(message, "thinking") and message.thinking:
+                    thinking = _sanitize(message.thinking)
+                elif hasattr(message, "model_extra") and message.model_extra:
+                    rc = message.model_extra.get("reasoning_content", "")
+                    if rc:
+                        thinking = _sanitize(rc)
+
+                if thinking and not self._silent:
+                    console.print(
+                        Panel(
+                            Markdown(thinking),
+                            title=f"💭 {self.name} 思考过程",
+                            border_style="blue",
+                        )
+                    )
+                    console.print(Rule(style="dim"))
+
+                native_tool_calls = []
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    for tc in message.tool_calls:
+                        native_tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                        )
+
+                return {
+                    "content": _sanitize(message.content) if message.content else "",
+                    "tool_calls": native_tool_calls,
+                    "thinking": thinking,
+                }
+
             else:
                 extra_body = {}
                 if self.thinking_mode == "reasoning_split":
