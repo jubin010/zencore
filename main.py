@@ -860,11 +860,25 @@ class ChatUI(App):
             # 清除工具调用相关消息，保留普通对话
             cleaned = []
             for msg in self.agent.conversation_history:
-                if msg.get("role") == "user":
+                role = msg.get("role", "")
+                content = msg.get("content", "") or ""
+
+                if role == "user":
                     cleaned.append(msg)
-                elif msg.get("role") == "assistant" and "tool_calls" not in msg:
-                    cleaned.append(msg)
-            self.agent.conversation_history = cleaned
+                elif role == "assistant":
+                    # 跳过有结构化 tool_calls 的消息
+                    if msg.get("tool_calls"):
+                        continue
+                    # 移除 content 中的纯文本 tool_calls 格式（如 [tool_calls]: [...]）
+                    cleaned_content = re.sub(
+                        r"\[tool_calls\]:\s*\[.*?\]",
+                        "",
+                        content,
+                        flags=re.DOTALL
+                    ).strip()
+                    if cleaned_content:
+                        msg["content"] = cleaned_content
+                        cleaned.append(msg)
 
             # 从 cleaned history 重建 UI
             msg_log.clear()
