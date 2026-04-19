@@ -859,53 +859,7 @@ class ChatUI(App):
             model_config = get_active_model(self.config)
             self.agent.driver.switch_model(model_config)
 
-            # 测试：不清理工具调用信息，保留完整上下文
-            # cleaned = []
-            # for msg in self.agent.conversation_history:
-            #     role = msg.get("role", "")
-            #     content = msg.get("content", "") or ""
-            #
-            #     if role == "user":
-            #         cleaned.append(msg)
-            #     elif role == "assistant":
-            #         # 跳过有结构化 tool_calls 的消息
-            #         if msg.get("tool_calls"):
-            #             continue
-            #         # 移除 content 中的纯文本 tool_calls 格式
-            #         cleaned_content = re.sub(
-            #             r"\[tool_calls\]:\s*\[.*?\]",
-            #             "",
-            #             content,
-            #             flags=re.DOTALL
-            #         ).strip()
-            #         if cleaned_content:
-            #             msg["content"] = cleaned_content
-            #             cleaned.append(msg)
-            #
-            # # 从 cleaned history 重建 UI
-            # msg_log.clear()
-            # self._plain_messages.clear()
-            # self._msg_meta.clear()
-            # for msg in cleaned:
-            #     role = msg.get("role", "")
-            #     content = msg.get("content", "") or ""
-            #     if role == "user":
-            #         plain = f"[{self._format_time()}] 👤: {content}"
-            #         self._plain_messages.append(plain)
-            #         styled = self._format_msg("👤", content)
-            #         self._msg_meta.append(("human", content, None))
-            #         msg_log.write(styled)
-            #     elif role == "assistant":
-            #         plain = f"[{self._format_time()}] 🤖 {content}"
-            #         self._plain_messages.append(plain)
-            #         styled = self._format_msg("AI", content)
-            #         self._msg_meta.append(("ai", content, None))
-            #         msg_log.write(styled)
-            #
-            # if self.session_db:
-            #     self.session_db.save_history(cleaned)
-
-            # 直接重建 UI（不清理工具调用）
+            # 切换模型后重建 UI（保留完整上下文包括工具调用）
             msg_log.clear()
             self._plain_messages.clear()
             self._msg_meta.clear()
