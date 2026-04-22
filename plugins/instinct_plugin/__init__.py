@@ -394,10 +394,40 @@ def register(agent):
         new_l2_content = "\n\n".join(new_l2_parts)
         _write_memory_sections(new_l2_content, promoted_content)
 
-        return f"🕊️ L2 缓存淘汰：{evicted_count}段低价值记忆已遗忘，保留 {len(kept_entries)} 段高频/近期记忆。"
+        return f"🕊️ L2 缓存淘汰：{evicted_count}段低价值记忆已遗忘，保留 {len(remaining)} 段高频/近期记忆。"
 
     agent.instinct_registry.register(
         "forgetting", forgetting_condition, reflex=forgetting_reflex
+    )
+
+    # 6. 修剪本能：压缩过长的工具返回，保留近期全量
+    def pruning_condition():
+        """对话历史超过 10 条时触发"""
+        return len(agent.conversation_history) > 10
+
+    def pruning_reflex():
+        """对较早的工具返回进行压缩摘要"""
+        history = agent.conversation_history
+        recent_count = 5  # 最近 5 条保持全量
+        threshold = 300  # 超过 300 字符的工具结果需要压缩
+
+        pruned = 0
+        for i, msg in enumerate(history):
+            if i >= len(history) - recent_count:
+                continue
+            if msg.get("role") == "tool":
+                content = msg.get("content", "") or ""
+                if len(content) > threshold:
+                    compressed = content[:200] + f"\n...[已修剪，原始长度 {len(content)} 字符]"
+                    history[i]["content"] = compressed
+                    pruned += 1
+
+        if pruned > 0:
+            return f"✂️ 修剪本能：{pruned} 条过长工具返回已压缩"
+        return None
+
+    agent.instinct_registry.register(
+        "pruning", pruning_condition, reflex=pruning_reflex
     )
 
     # 本能认知指南
