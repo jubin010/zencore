@@ -230,12 +230,24 @@ def register(agent):
                 except:
                     pass
 
-                cmd_name = command.split()[0] if command else ""
-                cmd_base = cmd_name.split("/")[-1].split("\\")[-1]
-                background = cmd_base in gui_programs
+                # 检测命令中是否包含 gui 程序（支持组合命令）
+                background = False
+                for gui_prog in gui_programs:
+                    if gui_prog in command:
+                        background = True
+                        break
 
             if background:
-                subprocess.Popen(command, shell=True, cwd=os.getcwd())
+                # 使用 setsid 彻底脱离终端，后台运行
+                subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=os.getcwd(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
                 return f"✅ 已后台启动: {command}"
 
             result = subprocess.run(
