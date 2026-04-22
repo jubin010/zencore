@@ -4,6 +4,7 @@ env_plugin - 环境感知及改造
 """
 
 import os
+import time
 import subprocess
 import shutil
 import datetime
@@ -470,6 +471,27 @@ def register(agent):
         },
     )
 
+    def is_wsl2():
+        return os.path.exists("/proc/version") and "microsoft" in open("/proc/version").read().lower()
+
+    def kill_process_robustly(pid: int) -> tuple[bool, str]:
+        """彻底杀进程：进程组 + SIGTERM→SIGKILL + 验证"""
+        try:
+            pgid = os.getpgid(pid)
+            for sig in (15, 9):
+                try:
+                    os.kill(-pgid if pgid != os.getpid() else pid, sig)
+                    time.sleep(0.2)
+                except ProcessLookupError:
+                    pass
+            if os.kill(pid, 0) in (None, []):
+                return True, f"PID {pid} 已关闭"
+            return False, f"PID {pid} 杀不掉"
+        except ProcessLookupError:
+            return True, f"PID {pid} 不存在"
+        except PermissionError:
+            return False, f"PID {pid} 无权限"
+
     def kill_background_process(proc_id: int = None, name: str = None) -> str:
         """关闭后台进程
 
@@ -478,34 +500,46 @@ def register(agent):
             name: 进程名称（描述，如"图片查看器"）
         """
         processes = _load_bg_processes()
-        killed = []
+        killed_ids = []
+        killed_msgs = []
+        failed = []
 
         for p in processes:
-            if proc_id is not None and p["id"] == proc_id:
-                try:
-                    os.kill(p["pid"], 9)
-                    killed.append(f"进程ID {p['id']} (PID {p['pid']})")
-                except ProcessLookupError:
-                    killed.append(f"进程ID {p['id']} 已不存在")
-                except PermissionError:
-                    return f"❌ 无权限关闭进程ID {p['id']}"
-            elif name is not None and name.lower() in p["command"].lower():
-                try:
-                    os.kill(p["pid"], 9)
-                    killed.append(f"进程 '{name}' (PID {p['pid']})")
-                except ProcessLookupError:
-                    killed.append(f"进程 '{name}' 已不存在")
-                except PermissionError:
-                    return f"❌ 无权限关闭进程 '{name}'"
+            if proc_id is not None and p["id"] != proc_id:
+                continue
+            if name is not None and name.lower() not in p["command"].lower():
+                continue
 
-        # 过滤掉已关闭的进程
-        remaining = [p for p in processes if p["id"] not in [x.split()[2] for x in killed if "进程ID" in x]]
-        # 重新保存
+            pid = p["pid"]
+            success, msg = kill_process_robustly(pid)
+            if success:
+                killed_ids.append(p["id"])
+                killed_msgs.append(f"进程ID {p['id']} (PID {pid})")
+            else:
+                failed.append((p["id"], pid, msg))
+
+        if failed and is_wsl2():
+            for proc_id, pid, msg in list(failed):
+                try:
+                    subprocess.run(
+                        ["wmic", "process", "where", f"processid={pid}", "call", "terminate"],
+                        capture_output=True, timeout=10
+                    )
+                    killed_ids.append(proc_id)
+                    killed_msgs.append(f"WSL2 Windows侧: PID {pid}")
+                    failed.remove((proc_id, pid, msg))
+                except:
+                    pass
+
+        remaining = [p for p in processes if p["id"] not in killed_ids]
         _save_bg_processes(remaining)
 
-        if killed:
-            return f"✅ 已关闭: {', '.join(killed)}"
-        return "❌ 未找到指定进程"
+        parts = []
+        if killed_msgs:
+            parts.append(f"✅ 已关闭: {', '.join(killed_msgs)}")
+        if failed:
+            parts.append(f"❌ 失败: {', '.join([f'{p[0]}/{p[1]}: {p[2]}' for p in failed])}")
+        return " | ".join(parts) if parts else "❌ 未找到指定进程"
 
     def list_background_processes() -> str:
         """列出当前后台进程"""
@@ -545,12 +579,18 @@ def register(agent):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "proc_id": {"type": "integer", "description": "进程ID（run_command 返回的 [进程ID]）"},
-                    "name": {"type": "string", "description": "进程名称关键词"},
-                },
+                    "proc_id": {
+                        "type": "integer",
+                        "description": "后台进程ID"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "进程名称（模糊匹配）"
+                    }
+                }
             },
             "plugin": "env_plugin",
-        },
+        }
     )
 
     agent.add_tool(

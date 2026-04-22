@@ -323,8 +323,8 @@ class AgentCore:
     def list_tools(self) -> Dict[str, Dict]:
         return self.tool_registry.list_all()
 
-    def execute_tool(self, name: str, **kwargs) -> str:
-        func = self.tool_registry.get(name)
+    def execute_tool(self, tool_name: str, **kwargs) -> str:
+        func = self.tool_registry.get(tool_name)
         if func:
             try:
                 return func(**kwargs)
