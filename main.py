@@ -1157,6 +1157,9 @@ def run_chat(
     server.start()
     session_db = SessionDB()
 
+    # 设置保存历史回调
+    agent._save_history_callback = session_db.save_history
+
     thinking_interval = (config or {}).get("thinking_interval", 60)
 
     human = HumanClient(

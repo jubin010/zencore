@@ -173,6 +173,9 @@ class AgentCore:
         # 上下文（无硬性限制，由本能 crowding reflex 管理大小）
         self.conversation_history = []
 
+        # 保存历史回调（由 UI 层设置，用于会话持久化）
+        self._save_history_callback = None
+
         # 当前加载的非核心插件
         self._loaded_plugins: set = set()
 
@@ -354,6 +357,11 @@ class AgentCore:
         msg.update(kwargs)
 
         self.conversation_history.append(msg)
+
+    def save_history(self):
+        """触发保存历史回调（如果有设置）"""
+        if self._save_history_callback:
+            self._save_history_callback(self.conversation_history)
 
     def clear_history(self):
         self.conversation_history = []

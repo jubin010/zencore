@@ -83,6 +83,9 @@ def register(agent):
             # 替换历史：摘要 + 保留的对话
             agent.conversation_history = [summary_msg] + to_keep
 
+            # 立即保存
+            agent.save_history()
+
             original_count = len(history)
             new_count = len(agent.conversation_history)
             return f"✅ 上下文摘要完成：{original_count} 条 → {new_count} 条\n{summary[:200]}..."
