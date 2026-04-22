@@ -213,54 +213,12 @@ def register(agent):
         )
 
     def crowding_reflex():
-        """自动归档：语义压缩后写入 L2 缓存，保留最近 10 条在 L1"""
-        history = agent.conversation_history
-        if len(history) < 10:
-            return None
-
-        recent = history[-10:]
-        summary_lines = [
-            f"> 📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            "> hits: 0",
-        ]
-
-        for msg in recent:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-
-            if role == "tool":
-                tool_name = msg.get("name", "unknown")
-                compressed = _compress_content(content, max_len=100)
-                summary_lines.append(f"- tool: {tool_name} → {compressed}")
-            elif role in ("user", "assistant") and content:
-                compressed = _compress_content(content, max_len=150)
-                if compressed:
-                    summary_lines.append(f"- {role}: {compressed}")
-
-        archive_entry = "\n".join(summary_lines)
-
-        # 写入 L2 缓存区
-        l2_content, promoted_content = _get_memory_sections()
-        l2_entries = _parse_l2_entries(l2_content)
-        l2_entries.append(
-            {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "hits": 0,
-                "lines": summary_lines,
-            }
-        )
-
-        # 重建 L2 内容（最新在最后）
-        new_l2_parts = []
-        for entry in l2_entries:
-            new_l2_parts.append("\n".join(entry["lines"]))
-        new_l2_content = "\n\n".join(new_l2_parts)
-
-        _write_memory_sections(new_l2_content, promoted_content)
-
-        # L1 只保留最近 4 条
-        agent.conversation_history = history[-10:]
-        return f"🧹 自动归档完成，{len(recent)}条对话已压缩写入 L2 缓存，L1 保留最近 4 条。"
+        """调用 summarize_context 工具进行上下文摘要"""
+        try:
+            result = agent.execute_tool("summarize_context", max_items=10)
+            return result
+        except Exception as e:
+            return f"❌ 摘要执行失败: {e}"
 
     agent.instinct_registry.register(
         "crowding", crowding_condition, crowding_prompt, reflex=crowding_reflex

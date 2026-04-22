@@ -23,6 +23,7 @@ ROLES_DIR = PLUGINS_DIR / "roles"
 CORE_PLUGINS = {
     "plugin_builder",
     "env_plugin",
+    "summarize_plugin",
     "memory_plugin",
     "watcher_plugin",
     "role_plugin",
