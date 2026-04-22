@@ -358,10 +358,10 @@ class AgentCore:
 
         self.conversation_history.append(msg)
 
-    def save_history(self):
-        """触发保存历史回调（如果有设置）"""
-        if self._save_history_callback:
-            self._save_history_callback(self.conversation_history)
+    def replace_history(self, new_history: list):
+        """替换对话历史（用于摘要等场景），替换后自动保存"""
+        self.conversation_history = new_history
+        self.save_history()
 
     def clear_history(self):
         self.conversation_history = []
