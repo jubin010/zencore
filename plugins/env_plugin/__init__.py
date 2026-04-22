@@ -7,9 +7,37 @@ import os
 import subprocess
 import shutil
 import datetime
+import json
 from pathlib import Path
 
 AGENT_ROOT = Path(__file__).parent.parent.parent
+
+# 后台进程管理器
+_bg_processes_file = AGENT_ROOT / "config" / ".bg_processes.json"
+
+
+def _load_bg_processes():
+    """加载后台进程列表"""
+    if _bg_processes_file.exists():
+        try:
+            with open(_bg_processes_file) as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+
+def _save_bg_processes(processes):
+    """保存后台进程列表"""
+    _bg_processes_file.parent.mkdir(exist_ok=True)
+    with open(_bg_processes_file, "w") as f:
+        json.dump(processes, f, ensure_ascii=False)
+
+
+def _get_next_id():
+    """获取下一个进程 ID"""
+    processes = _load_bg_processes()
+    return len(processes) + 1
 
 
 def register(agent):
@@ -220,7 +248,6 @@ def register(agent):
         try:
             # 加载 gui_programs 配置
             if background is None:
-                import json
                 config_file = AGENT_ROOT / "config" / "settings.json"
                 gui_programs = []
                 try:
@@ -239,7 +266,7 @@ def register(agent):
 
             if background:
                 # 使用 setsid 彻底脱离终端，后台运行
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     command,
                     shell=True,
                     cwd=os.getcwd(),
@@ -248,7 +275,17 @@ def register(agent):
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                return f"✅ 已后台启动: {command}"
+                # 保存进程信息
+                proc_id = _get_next_id()
+                processes = _load_bg_processes()
+                processes.append({
+                    "id": proc_id,
+                    "pid": proc.pid,
+                    "command": command,
+                    "started": datetime.datetime.now().isoformat()
+                })
+                _save_bg_processes(processes)
+                return f"✅ 已后台启动: {command} [进程ID: {proc_id}, PID: {proc.pid}]"
 
             result = subprocess.run(
                 command,
@@ -433,6 +470,100 @@ def register(agent):
         },
     )
 
+    def kill_background_process(proc_id: int = None, name: str = None) -> str:
+        """关闭后台进程
+
+        Args:
+            proc_id: 后台进程 ID（run_command 返回的 [进程ID]）
+            name: 进程名称（描述，如"图片查看器"）
+        """
+        processes = _load_bg_processes()
+        killed = []
+
+        for p in processes:
+            if proc_id is not None and p["id"] == proc_id:
+                try:
+                    os.kill(p["pid"], 9)
+                    killed.append(f"进程ID {p['id']} (PID {p['pid']})")
+                except ProcessLookupError:
+                    killed.append(f"进程ID {p['id']} 已不存在")
+                except PermissionError:
+                    return f"❌ 无权限关闭进程ID {p['id']}"
+            elif name is not None and name.lower() in p["command"].lower():
+                try:
+                    os.kill(p["pid"], 9)
+                    killed.append(f"进程 '{name}' (PID {p['pid']})")
+                except ProcessLookupError:
+                    killed.append(f"进程 '{name}' 已不存在")
+                except PermissionError:
+                    return f"❌ 无权限关闭进程 '{name}'"
+
+        # 过滤掉已关闭的进程
+        remaining = [p for p in processes if p["id"] not in [x.split()[2] for x in killed if "进程ID" in x]]
+        # 重新保存
+        _save_bg_processes(remaining)
+
+        if killed:
+            return f"✅ 已关闭: {', '.join(killed)}"
+        return "❌ 未找到指定进程"
+
+    def list_background_processes() -> str:
+        """列出当前后台进程"""
+        processes = _load_bg_processes()
+        if not processes:
+            return "暂无后台进程"
+
+        lines = ["当前后台进程:"]
+        for p in processes:
+            lines.append(f"- ID {p['id']}: {p['command']} (PID {p['pid']}, 启动于 {p['started']})")
+        return "\n".join(lines)
+
+    agent.add_tool(
+        "run_command",
+        run_command,
+        {
+            "name": "run_command",
+            "description": "执行 shell 命令。GUI 程序会自动后台运行并返回进程ID",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer"},
+                },
+                "required": ["command"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "kill_background_process",
+        kill_background_process,
+        {
+            "name": "kill_background_process",
+            "description": "关闭后台进程",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proc_id": {"type": "integer", "description": "进程ID（run_command 返回的 [进程ID]）"},
+                    "name": {"type": "string", "description": "进程名称关键词"},
+                },
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "list_background_processes",
+        list_background_processes,
+        {
+            "name": "list_background_processes",
+            "description": "列出当前后台进程",
+            "parameters": {"type": "object", "properties": {}},
+            "plugin": "env_plugin",
+        },
+    )
+
     agent.add_tool(
         "backup_state",
         backup_state,
@@ -451,9 +582,9 @@ def register(agent):
 
     return {
         "name": "env_plugin",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "author": "AgentCore",
-        "description": "环境感知及改造 — 文件读写搜、索命令执行、状态备份",
+        "description": "环境感知及改造 — 文件读写搜、索命令执行、状态备份、后台进程管理",
         "tools": [
             "get_cwd",
             "list_files",
@@ -463,6 +594,8 @@ def register(agent):
             "find_file",
             "grep",
             "run_command",
+            "kill_background_process",
+            "list_background_processes",
             "backup_state",
         ],
     }
