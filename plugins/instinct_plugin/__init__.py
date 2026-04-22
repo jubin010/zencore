@@ -402,25 +402,28 @@ def register(agent):
 
     # 6. 修剪本能：压缩过长的工具返回，保留近期全量
     def pruning_condition():
-        """对话历史超过 10 条时触发"""
-        return len(agent.conversation_history) > 10
+        """工具返回超过 5 条时触发"""
+        tool_count = sum(1 for msg in agent.conversation_history if msg.get("role") == "tool")
+        return tool_count > 5
 
     def pruning_reflex():
         """对较早的工具返回进行压缩摘要"""
         history = agent.conversation_history
-        recent_count = 5  # 最近 5 条保持全量
+        recent_tool_count = 3  # 最近 3 条工具返回保持全量
         threshold = 300  # 超过 300 字符的工具结果需要压缩
 
+        tool_msgs = [(i, msg) for i, msg in enumerate(history) if msg.get("role") == "tool"]
+        if len(tool_msgs) <= recent_tool_count:
+            return None
+
         pruned = 0
-        for i, msg in enumerate(history):
-            if i >= len(history) - recent_count:
+        for idx, (i, msg) in enumerate(tool_msgs):
+            if idx >= len(tool_msgs) - recent_tool_count:
                 continue
-            if msg.get("role") == "tool":
-                content = msg.get("content", "") or ""
-                if len(content) > threshold:
-                    compressed = content[:200] + f"\n...[已修剪，原始长度 {len(content)} 字符]"
-                    history[i]["content"] = compressed
-                    pruned += 1
+            content = msg.get("content", "") or ""
+            if len(content) > threshold:
+                history[i]["content"] = content[:200] + f"\n...[已修剪，原始长度 {len(content)} 字符]"
+                pruned += 1
 
         if pruned > 0:
             return f"✂️ 修剪本能：{pruned} 条过长工具返回已压缩"
