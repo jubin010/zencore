@@ -402,14 +402,14 @@ def register(agent):
 
     # 6. 修剪本能：压缩过长的工具返回，保留近期全量
     def pruning_condition():
-        """工具返回超过 5 条时触发"""
+        """工具返回超过 15 条时触发"""
         tool_count = sum(1 for msg in agent.conversation_history if msg.get("role") == "tool")
-        return tool_count > 5
+        return tool_count > 15
 
     def pruning_reflex():
         """对较早的工具返回进行压缩摘要"""
         history = agent.conversation_history
-        recent_tool_count = 3  # 最近 3 条工具返回保持全量
+        recent_tool_count = 10  # 最近 10 条工具返回保持全量
         threshold = 300  # 超过 300 字符的工具结果需要压缩
 
         tool_msgs = [(i, msg) for i, msg in enumerate(history) if msg.get("role") == "tool"]
