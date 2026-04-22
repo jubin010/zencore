@@ -80,8 +80,8 @@ def register(agent):
                 "content": f"[上下文摘要]\n{summary}\n[/上下文摘要]"
             }
 
-            # 使用 replace_history 替换，自动保存
-            agent.replace_history([summary_msg] + to_keep)
+            # 替换历史：摘要 + 保留的对话
+            agent.conversation_history = [summary_msg] + to_keep
 
             original_count = len(history)
             new_count = len(agent.conversation_history)
