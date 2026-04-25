@@ -668,6 +668,7 @@ class ChatUI(App):
         yield Horizontal(
             LoadingIndicator(id="loading"),
             Static("AI 推理中...", id="status-text"),
+            Static("", id="token-count"),
             id="status-bar",
         )
 
@@ -683,6 +684,7 @@ class ChatUI(App):
         self.set_interval(0.1, self._poll_ai_messages)
         self.set_interval(0.5, self._sync_input_activity)
         self.set_interval(0.3, self._update_loading_status)
+        self.set_interval(1, self._update_token_count)
         self.set_interval(1, self._check_terminal_size)
 
     def _update_loading_status(self):
@@ -694,6 +696,20 @@ class ChatUI(App):
         else:
             loading.display = False
             status_text.display = False
+
+    def _update_token_count(self):
+        if not self.agent:
+            return
+        token_count = sum(
+            len(msg.get("content", "") or "") // 4
+            for msg in self.agent.conversation_history
+        )
+        threshold = 24000
+        if self.agent.driver and hasattr(self.agent.driver, "model_config"):
+            threshold = self.agent.driver.model_config.get("context_threshold", 24000)
+        pct = min(100, token_count * 100 // threshold) if threshold else 0
+        token_display = self.query_one("#token-count", Static)
+        token_display.update(f"[dim]Tokens: {token_count} ({pct}%)[/dim]")
 
     def _sync_input_activity(self):
         input_box = self.query_one("#input-box", SendTextArea)
@@ -776,10 +792,13 @@ class ChatUI(App):
                 if role == "tool":
                     self._plain_messages.append(f"[{self._format_time()}] 🔧 {content}")
                     if self._render_mode and self._msg_log:
+                        display_content = content
+                        if len(content) > 300:
+                            display_content = content[:300] + "\n... (已截断)"
                         styled = self._format_msg(
-                            "🔧工具", content, border_color="#fabd2f"
+                            "🔧工具", display_content, border_color="#fabd2f"
                         )
-                        self._msg_meta.append(("tool", content, "#fabd2f"))
+                        self._msg_meta.append(("tool", display_content, "#fabd2f"))
                         self._msg_log.write(styled)
                 elif role == "reflex":
                     self._plain_messages.append(f"[{self._format_time()}] {content}")
@@ -791,12 +810,12 @@ class ChatUI(App):
                         self._msg_log.write(styled)
                 elif role == "thinking":
                     display_content = (
-                        content[:2000] + "\n... (已截断)"
-                        if len(content) > 2000
+                        content[:500] + "\n... (已截断)"
+                        if len(content) > 500
                         else content
                     )
                     self._plain_messages.append(
-                        f"[{self._format_time()}] 💭 思考\n{display_content}"
+                        f"[{self._format_time()}] 💭 思考\n{content}"
                     )
                     if self._render_mode and self._msg_log:
                         styled = self._format_msg(
@@ -809,8 +828,15 @@ class ChatUI(App):
                         f"[{self._format_time()}] AI: {content}"
                     )
                     if self._render_mode and self._msg_log:
-                        styled = self._format_msg("AI", content)
-                        self._msg_meta.append(("ai", content, None))
+                        display_content = content
+                        if content.startswith("🔧"):
+                            args_start = content.find("(")
+                            if args_start > 0:
+                                args_str = content[args_start:]
+                                if len(args_str) > 100:
+                                    display_content = content[:args_start] + args_str[:100] + "...)"
+                        styled = self._format_msg("AI", display_content)
+                        self._msg_meta.append(("ai", display_content, None))
                         self._msg_log.write(styled)
             except queue.Empty:
                 break
@@ -954,7 +980,7 @@ class ChatUI(App):
                 display_content = content
                 if len(content) > 300:
                     display_content = content[:300] + "\n... (已截断)"
-                plain = f"[{self._format_time()}] 🔧 {display_content}"
+                plain = f"[{self._format_time()}] 🔧 {content}"
                 self._plain_messages.append(plain)
                 styled = self._format_msg("🔧工具", display_content, border_color="#fabd2f")
                 self._msg_meta.append(("tool", display_content, "#fabd2f"))
@@ -971,21 +997,24 @@ class ChatUI(App):
                             args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
                         except:
                             args_dict = {}
-                        args_list = []
+                        args_list_plain = []
+                        args_list_styled = []
                         for k, v in args_dict.items():
                             v_str = repr(v)
-                            if len(v_str) > 30:
-                                v_str = v_str[:30] + "..."
-                            args_list.append(f"{k}={v_str}")
-                        args_display = ", ".join(args_list)
-                        if len(args_display) > 100:
-                            args_display = args_display[:100] + "..."
-                        call_display = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
-                        plain = f"[{self._format_time()}] {call_display}"
+                            v_str_styled = v_str[:30] + "..." if len(v_str) > 30 else v_str
+                            args_list_plain.append(f"{k}={v_str}")
+                            args_list_styled.append(f"{k}={v_str_styled}")
+                        args_display_plain = ", ".join(args_list_plain)
+                        args_display_styled = ", ".join(args_list_styled)
+                        if len(args_display_styled) > 100:
+                            args_display_styled = args_display_styled[:100] + "..."
+                        call_display_plain = f"🔧 `{plugin_name}/{tool_name}`({args_display_plain})"
+                        call_display_styled = f"🔧 `{plugin_name}/{tool_name}`({args_display_styled})"
+                        plain = f"[{self._format_time()}] {call_display_plain}"
                         self._plain_messages.append(plain)
                         if self._render_mode and self._msg_log:
-                            styled = self._format_msg("AI", call_display)
-                            self._msg_meta.append(("ai", call_display, None))
+                            styled = self._format_msg("AI", call_display_styled)
+                            self._msg_meta.append(("ai", call_display_styled, None))
                             self._msg_log.write(styled)
                 if content:
                     plain = f"[{self._format_time()}] AI: {content}"

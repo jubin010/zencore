@@ -327,7 +327,6 @@ class CLIDriver(DriverInterface):
                 extra_body = {"chat_template_kwargs": {}}
                 if self.thinking:
                     extra_body["chat_template_kwargs"]["enable_thinking"] = True
-                    extra_body["chat_template_kwargs"]["thinking_language"] = "zh"
                 else:
                     extra_body["chat_template_kwargs"]["enable_thinking"] = False
                 if self.thinking_mode and self.thinking_mode.startswith("extra_body:"):
@@ -394,6 +393,8 @@ class CLIDriver(DriverInterface):
                     rc = message.model_extra.get("reasoning_content", "")
                     if rc:
                         thinking = _sanitize(rc)
+                elif hasattr(message, "reasoning_content") and message.reasoning_content:
+                    thinking = _sanitize(message.reasoning_content)
 
                 if thinking and not self._silent:
                     console.print(

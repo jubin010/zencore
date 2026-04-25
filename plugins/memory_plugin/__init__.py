@@ -14,6 +14,7 @@ MEMORY_FILE = Path(__file__).parent / "memory.md"
 LESSONS_FILE = Path(__file__).parent / "lessons.md"
 WINS_FILE = Path(__file__).parent / "wins.md"
 USER_PROFILE_FILE = Path(__file__).parent / "user_profile.md"
+MAIN_ROLE_FILE = Path(__file__).parent / "main_role.md"
 
 GLOBAL_LESSONS = LESSONS_FILE
 GLOBAL_WINS = WINS_FILE
@@ -23,7 +24,7 @@ L2_CACHE_SECTION = "## L2 缓存区\n"
 PROMOTED_MARKER = "<!-- PROMOTED -->"
 PROMOTED_SECTION = "## 持久记忆\n"
 
-ROLES_DIR = Path(__file__).parent.parent / "roles"
+SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
 def _compress_code_blocks(content: str) -> str:
@@ -636,32 +637,6 @@ def register(agent):
             return f"## 成功经验（复用有效路径）\n\n{content}"
         return ""
 
-    def role_lessons_condition():
-        return bool(agent._current_role)
-
-    def role_lessons_prompt():
-        if not agent._current_role:
-            return ""
-        role_lessons = ROLES_DIR / agent._current_role / "lessons.md"
-        if role_lessons.exists():
-            content = role_lessons.read_text(encoding="utf-8").strip()
-            if content and "暂无教训" not in content:
-                return f"## {agent._current_role} 专属教训\n\n{content}"
-        return ""
-
-    def role_wins_condition():
-        return bool(agent._current_role)
-
-    def role_wins_prompt():
-        if not agent._current_role:
-            return ""
-        role_wins = ROLES_DIR / agent._current_role / "wins.md"
-        if role_wins.exists():
-            content = role_wins.read_text(encoding="utf-8").strip()
-            if content and "暂无成功经验" not in content:
-                return f"## {agent._current_role} 专属成功经验\n\n{content}"
-        return ""
-
     def user_profile_condition():
         return True
 
@@ -672,7 +647,30 @@ def register(agent):
             else ""
         )
         if content and "暂无" not in content:
-            return f"## 用户特征\n\n{content}"
+            return f"""## 用户特征
+
+{content}
+
+---
+*感知到用户偏好或用户要求记忆的信息，用 append_file 追加到 user_profile.md*"""
+        return ""
+
+    def main_role_condition():
+        return True
+
+    def main_role_prompt():
+        if not MAIN_ROLE_FILE.exists():
+            return ""
+        content = MAIN_ROLE_FILE.read_text(encoding="utf-8").strip()
+        if content:
+            return f"""## 主角色身份
+
+ 你在对话中扮演的角色（前台身份）：
+
+ {content}
+
+ ---
+ *以上是 main_role.md 定义的角色描述，这是你与用户沟通时的身份。*"""
         return ""
 
     agent.instinct_registry.register(
@@ -682,11 +680,10 @@ def register(agent):
         "global_wins", global_wins_condition, global_wins_prompt
     )
     agent.instinct_registry.register(
-        "role_lessons", role_lessons_condition, role_lessons_prompt
-    )
-    agent.instinct_registry.register("role_wins", role_wins_condition, role_wins_prompt)
-    agent.instinct_registry.register(
         "user_profile", user_profile_condition, user_profile_prompt
+    )
+    agent.instinct_registry.register(
+        "main_role", main_role_condition, main_role_prompt
     )
 
     return {

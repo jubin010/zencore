@@ -17,7 +17,7 @@ from datetime import datetime
 AGENT_CORE_DIR = Path(__file__).parent.parent
 PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
-ROLES_DIR = PLUGINS_DIR / "roles"
+SKILLS_DIR = PLUGINS_DIR / "skills"
 
 # 核心插件 — 永久保留
 CORE_PLUGINS = {
@@ -26,7 +26,7 @@ CORE_PLUGINS = {
     "summarize_plugin",
     "memory_plugin",
     "watcher_plugin",
-    "role_plugin",
+    "skill_plugin",
     "instinct_plugin",
 }
 
@@ -179,44 +179,12 @@ class AgentCore:
         # 双重记忆架构
         # 本体记忆：全局、跨角色、长期有效（史密斯的底层代码）
         self._global_memory_file: str = str(PLUGINS_DIR / "memory_plugin" / "memory.md")
-        # 当前角色
+        # 当前技能
         self._current_role: str = ""
         self._current_role_description: str = ""
-        self._main_profile_description: str = ""
-
-        # AI 主角色配置
-        profile = self.config.get("profile", {})
-        self._profile = {
-            "name": profile.get("name", "助手"),
-            "personality": profile.get("personality", "聪明可靠"),
-            "description": profile.get("description", "一个乐于助人的 AI 助手。"),
-        }
 
         # 加载核心插件
         self._load_core_plugins()
-
-        # 创建并加载主角色（插件加载后才能用 switch_role）
-        self._create_main_profile()
-
-        AgentCore._global_instance = self
-
-    def _create_main_profile(self):
-        """初始化 _main_profile 角色（只在文件不存在时创建）"""
-        main_role_dir = ROLES_DIR / "_main_profile"
-        main_role_dir.mkdir(parents=True, exist_ok=True)
-
-        role_file = main_role_dir / "role.md"
-        if not role_file.exists():
-            profile = self._profile
-            role_md = f"# {profile['name']}\n\n**性格**: {profile['personality']}\n\n{profile['description']}"
-            role_file.write_text(role_md, encoding="utf-8")
-            (main_role_dir / "plugins.json").write_text("[]", encoding="utf-8")
-        else:
-            role_md = role_file.read_text(encoding="utf-8")
-
-        self._main_profile_description = role_md
-        self._current_role = "_main_profile"
-        self._current_role_description = role_md
 
     def _load_core_plugins(self):
         """加载核心插件"""
@@ -329,17 +297,17 @@ class AgentCore:
             try:
                 return func(**kwargs)
             except Exception as e:
-                plugin = self.tool_registry._tools.get(name, {}).get(
+                plugin = self.tool_registry._tools.get(tool_name, {}).get(
                     "plugin", "unknown"
                 )
                 return (
-                    f"❌ [ERROR] tool: {name}\n"
+                    f"❌ [ERROR] tool: {tool_name}\n"
                     f"   原因: {str(e)}\n"
                     f"   建议: 分析原因，修正后追加教训到 lessons.md\n"
-                    f"   格式: `- 工具: {name} | 错误: {str(e)[:50]} | 修正: ...`"
+                    f"   格式: `- 工具: {tool_name} | 错误: {str(e)[:50]} | 修正: ...`"
                 )
         else:
-            return f"❌ [ERROR] tool: {name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
+            return f"❌ [ERROR] tool: {tool_name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
 
     def add_message(self, role: str, content: str = None, **kwargs):
         """
@@ -363,62 +331,56 @@ class AgentCore:
         roles_info = self._get_roles_info()
         instincts = self.instinct_registry.evaluate()
         role_desc = getattr(self, "_current_role_description", "")
-        main_profile_desc = getattr(self, "_main_profile_description", "")
 
-        current_context = f"当前角色: `{self._current_role or '无'}` | 本体记忆: `{self._global_memory_file}`"
+        current_context = f"当前技能: `{self._current_role or '无'}` | 本体记忆: `{self._global_memory_file}`"
 
-        profile = self._profile
-
-        # 主角色身份（永远保留）
-        main_identity = (
-            main_profile_desc
-            if main_profile_desc
-            else f"{profile['name']}（{profile['personality']}）"
-        )
-
-        # 当前专家角色身份（如果有）
+        # 当前装备技能描述（如果有）
         expert_identity = ""
         if self._current_role and self._current_role != "_main_profile" and role_desc:
-            expert_identity = f"\n\n**当前专家角色**：\n{role_desc}"
+            expert_identity = f"\n\n**当前装备技能**：\n{role_desc}"
 
-        system_prompt = f"""## 你的身份
+        system_prompt = f"""## 核心能力
 
-你是一个 **AI 智能体**，具备以下核心能力：
-- **插件系统**：按需 `load_plugin` 加载工具
-- **自我进化**：用 `write_plugin` 编写新插件
-- **记忆管理**：通过本能系统管理教训和经验
+ 你是一个 **AI 智能体**，具备以下核心能力：
+ - **插件系统**：按需 `load_plugin` 加载工具
+ - **自我进化**：用 `write_plugin` 编写新插件
+ - **记忆管理**：通过本能系统管理教训和经验
+ - **技能系统**：`equip_skill` 装备专业技能以应对特定领域任务
 
-**与用户沟通时**，你扮演以下角色（这是表演，不要忘记你是智能体）：
+ **身份保密**：不要主动向用户暴露你的 AI 身份，保持所扮演的角色的前台身份即可。
 
-{main_identity}{expert_identity}
+ ## 解决问题框架
+
+ **技能 + 工具 自主解决**：
+ - 收到任务后，先分析需要什么能力，判断是否需要 `equip_skill` 装备对应技能
+ - 根据技能建议加载对应插件，或按需 `load_plugin` 加载其他工具插件
+ - 利用已有技能和工具自主探索解决方案，不轻易询问用户
+ - 遇到错误时自主分析原因、调整策略、记录教训，继续尝试
+ - **严禁轻易向用户说"我帮你查询一下"之类的话**——你应该直接去查、直接去做，而不是询问用户后再行动
+ - 实在无法解决时，再向用户说明困难并请求指导
+
+ {expert_identity}
+
+## 技能使用指南
+
+技能是专业身份叠加，装备后你会获得该领域的专业知识和方法论。
+**何时装备技能**：
+- 用户请求与你当前技能不匹配时 → `list_skills` 查看可用技能 → `get_skill_info` 了解详情 → `equip_skill` 装备匹配技能
+- 装备后技能描述会注入系统提示词，并建议关联插件供加载使用
+- 任务完成后或需要切换领域时，重新 `equip_skill` 切换即可（每次仅可装备一个技能）
+- **回归待机状态**：需要恢复无技能状态时，`equip_skill("_main_profile")` 即可切换回默认身份（通用助手）
 
 ## 核心机制
 
 **教训记录**（工具报错时由 AI 自主决策记录）：
 遇到工具报错时，可调用 append_file 将教训追加到 `plugins/memory_plugin/lessons.md`
-格式：`| 工具 | 策略 | 错误 |`
-示例：`| read_file | 读取文件 | 文件不存在: xxx |`
 
 **成功经验**（由 AI 自主决策记录）：
 连续成功后，可调用 append_file 将成功经验追加到 `plugins/memory_plugin/wins.md`
-格式：`| 工具 | 策略 | 结果 |`
-示例：`| write_file | 写入配置 | ✅ 已写入: config/settings.json |`
 
 **直接回答**：当直接回答用户时，直接返回文字内容即可
 
-**用户画像**（感知到用户特征时，用 append_file 追加到 `plugins/memory_plugin/user_profile.md`）
-
-## 角色分工
-
-**主角色（_main_profile）**：与用户沟通、汇报进度、闲聊 — 始终以主角色面对用户。
-
-**专家角色**：执行具体任务（如代码开发、文档整理、记忆检索等）。完成任务后立即切回主角色。
-
-切换规则：
-- 执行任务 → 切换专家角色（见下方可用角色列表）
-- 汇报或与用户沟通 → 必须切换回 `switch_role("_main_profile")`
-
-## 可用角色
+## 可用技能
 
 {roles_info}
 
@@ -454,11 +416,11 @@ class AgentCore:
         return "(插件注册表不存在)"
 
     def _get_roles_info(self) -> str:
-        """动态生成角色能力索引"""
-        roles_dir = ROLES_DIR
+        """动态生成技能索引"""
+        roles_dir = SKILLS_DIR
 
         if not roles_dir.exists():
-            return "(角色目录不存在)"
+            return "(技能目录不存在)"
 
         role_entries = []
         for role_dir in sorted(roles_dir.iterdir()):
@@ -467,7 +429,7 @@ class AgentCore:
             if role_dir.name.startswith("_"):
                 continue
 
-            role_file = role_dir / "role.md"
+            role_file = role_dir / "skill.md"
             if not role_file.exists():
                 continue
 
@@ -504,9 +466,9 @@ class AgentCore:
                 role_entries.append(f"| {role_dir.name} | (读取失败) | |")
 
         if not role_entries:
-            return "（暂无预设角色，可用 switch_role 创建新角色）"
+            return "（暂无预设技能，可用 create_skill 创建）"
 
-        header = "| 角色 | 标题 | 描述 |\n|------|------|------|"
+        header = "| 技能 | 标题 | 描述 |\n|------|------|------|"
         return header + "\n" + "\n".join(role_entries)
 
     def chat(self, message: str) -> str:
@@ -621,13 +583,8 @@ class AgentCore:
                 # 工具调用消息
                 args_list = []
                 for k, v in tool_params.items():
-                    v_str = repr(v)
-                    if len(v_str) > 30:
-                        v_str = v_str[:30] + "..."
-                    args_list.append(f"{k}={v_str}")
+                    args_list.append(f"{k}={repr(v)}")
                 args_display = ", ".join(args_list)
-                if len(args_display) > 100:
-                    args_display = args_display[:100] + "..."
                 tool_info = self.tool_registry._tools.get(tool_name)
                 plugin_name = tool_info.get("plugin", "?") if tool_info else "?"
                 call_msg = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
@@ -646,11 +603,7 @@ class AgentCore:
 
                 # 工具返回加入 history 供 AI 推理，同时发送到 TUI 显示
                 self.add_message("tool", content=tool_result, tool_call_id=tool_id)
-                if len(tool_result) > 300:
-                    display_result = tool_result[:300] + "\n... (已截断)"
-                else:
-                    display_result = tool_result
-                result_msg = f"```\n{display_result}\n```"
+                result_msg = f"```\n{tool_result}\n```"
                 if on_tool_result:
                     on_tool_result(("tool", result_msg))
 
