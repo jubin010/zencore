@@ -104,11 +104,11 @@ def register(agent):
         get_skill_info,
         {
             "name": "get_skill_info",
-            "description": "查看技能详情",
+            "description": "查看技能详情。参数skill_name是技能文件夹名称，如developer、auditor等",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "skill_name": {"type": "string", "description": "技能名"}
+                    "skill_name": {"type": "string", "description": "技能名称（必填），如developer、auditor"}
                 },
                 "required": ["skill_name"],
             },
