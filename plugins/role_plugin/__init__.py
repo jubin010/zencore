@@ -9,10 +9,19 @@ role_plugin - 角色
 """
 
 import json
+import sys
 from pathlib import Path
 from datetime import datetime
 
 ROLES_DIR = Path(__file__).parent.parent / "roles"
+CORE_PLUGINS = {
+    "plugin_builder",
+    "env_plugin",
+    "memory_plugin",
+    "watcher_plugin",
+    "role_plugin",
+    "instinct_plugin",
+}
 
 
 def register(agent):
@@ -68,17 +77,9 @@ def register(agent):
             else:
                 lines.append("  （无需额外插件）")
 
-        memory_file = role_dir / "memory.md"
-        if memory_file.exists():
-            lines.append("")
-            lines.append("## 记忆")
-            lines.append(memory_file.read_text(encoding="utf-8")[:500])
-
         return "\n".join(lines)
 
-    def create_role(
-        role_name: str, role_md: str, plugins_json: str = "[]", memory_md: str = ""
-    ) -> str:
+    def create_role(role_name: str, role_md: str, plugins_json: str = "[]") -> str:
         """
         创造新角色
 
@@ -86,7 +87,7 @@ def register(agent):
             role_name: 角色名
             role_md: 角色身份描述（Markdown）
             plugins_json: 该角色需要的插件列表（JSON 数组字符串）
-            memory_md: 初始记忆（Markdown）
+            plugins_json: 该角色需要的插件列表（JSON 数组字符串）
         """
         try:
             role_dir = ROLES_DIR / role_name
@@ -104,13 +105,6 @@ def register(agent):
                 json.dumps(plugins, ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
-            if memory_md:
-                (role_dir / "memory.md").write_text(memory_md, encoding="utf-8")
-            else:
-                (role_dir / "memory.md").write_text(
-                    f"# {role_name} 记忆\n\n（记忆为空）", encoding="utf-8"
-                )
-
             return f"✅ 角色 `{role_name}` 已创造"
         except Exception as e:
             return f"❌ 创造角色失败: {e}"
@@ -120,32 +114,17 @@ def register(agent):
         切换角色 — 按需加载，用完即释放
 
         流程：
-        1. 持久化当前角色记忆到 Disk（如果有）
-        2. 清空 L1（conversation_history），释放空间
-        3. 加载新角色记忆到 L1
-        4. 本能信息仍然持续注入（与角色无关）
+        1. 加载新角色的 role.md 作为身份描述
+        2. 本能信息仍然持续注入（与角色无关）
         """
         role_dir = ROLES_DIR / role_name
         if not role_dir.is_dir():
             return f"❌ 角色不存在: {role_name}"
 
-        # 1. 持久化当前角色的 working memory 到 Disk
-        # （当前对话中属于该角色的工作笔记，不包含本能注入的信息）
-        if agent._current_role and agent._current_role_memory_file:
-            _persist_role_working_memory(agent)
-
-        # 2. 清空 L1（释放空间）- 保留系统提示和本能信息
-        agent.conversation_history = []
-
-        # 3. 加载新角色
+        # 1. 加载新角色
         agent._current_role = role_name
-        memory_file = role_dir / "memory.md"
-        if memory_file.exists():
-            agent._current_role_memory_file = str(memory_file)
-        else:
-            agent._current_role_memory_file = ""
 
-        # 4. 读取角色描述、插件清单和记忆
+        # 2. 读取角色描述、插件清单
         role_desc = ""
         role_file = role_dir / "role.md"
         if role_file.exists():
@@ -153,56 +132,34 @@ def register(agent):
 
         plugins_file = role_dir / "plugins.json"
         plugins_info = ""
+        new_role_needs_non_core = []
         if plugins_file.exists():
             plugins = json.loads(plugins_file.read_text(encoding="utf-8"))
             if plugins:
+                new_role_needs_non_core = [p for p in plugins if p not in CORE_PLUGINS]
                 plugins_info = (
-                    f"\n\n所需插件: {', '.join(plugins)}\n请用 load_plugin 逐一加载"
+                    f"\n\n💡 建议插件: {', '.join(plugins)}\n请用 load_plugin 按需加载"
                 )
             else:
                 plugins_info = "\n\n（此角色无需额外插件）"
 
-        # 5. 加载角色记忆到 L1（作为系统上下文的一部分）
-        role_memory_content = ""
-        if memory_file.exists():
-            mem_content = memory_file.read_text(encoding="utf-8")
-            if mem_content and "（记忆为空）" not in mem_content:
-                role_memory_content = f"\n\n## 角色记忆\n\n{mem_content}"
+        # 卸载不再需要的非核心插件（非核心插件槽位用完就空着）
+        for prev in list(agent._loaded_plugins):
+            if prev not in CORE_PLUGINS and prev not in new_role_needs_non_core:
+                agent._remove_plugin_tools(prev)
+                agent._loaded_plugins.discard(prev)
+                if prev in sys.modules:
+                    del sys.modules[f"plugins.{prev}"]
 
         msg = f"✅ 已切换角色: {role_name}"
-        if role_desc:
-            msg += f"\n\n身份:\n{role_desc}"
-        if role_memory_content:
-            msg += f"\n\n角色记忆已加载到当前上下文{role_memory_content}"
-        msg += plugins_info
-        msg += "\n\n💡 提示：本能信息（教训、成功经验）会自动注入，无需角色记忆时请切换回无角色状态。"
+        if plugins_info:
+            msg += plugins_info
+        msg += '\n💡 提示：本能信息（教训、成功经验）会自动注入。任务完成后切换回主角色 `switch_role("_main_profile")`。'
+
+        # 返回角色描述供 AgentCore 注入系统提示词
+        agent._current_role_description = role_desc
 
         return msg
-
-    def _persist_role_working_memory(agent):
-        """将当前角色的 working memory 追加到 Disk"""
-        if not agent._current_role_memory_file:
-            return
-
-        memory_file = Path(agent._current_role_memory_file)
-        if not memory_file.exists():
-            return
-
-        # 从 conversation_history 中提取属于当前角色的工作笔记
-        # 这些是 AI 在当前角色下产生的新记忆
-        working_notes = []
-        for msg in agent.conversation_history:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role == "system" and content:
-                # 检查是否包含 "角色工作笔记" 标记
-                if "## 角色工作笔记" in content or "## Working Notes" in content:
-                    working_notes.append(content)
-
-        if working_notes:
-            existing = memory_file.read_text(encoding="utf-8")
-            new_content = existing + "\n\n## 工作笔记\n\n" + "\n\n".join(working_notes)
-            memory_file.write_text(new_content, encoding="utf-8")
 
     agent.add_tool(
         "list_roles",
@@ -272,9 +229,69 @@ def register(agent):
         },
     )
 
+    # 角色切换指南本能
+    def role_guide_condition():
+        return True
+
+    def role_guide_prompt():
+        return """## 专家角色
+
+遇到以下情况时，考虑切换到专家角色：
+- 用户问题涉及特定领域（编程、写作、分析等）
+- 需要该领域的专业方法论
+- 需要专注完成某个特定任务
+
+**主角色永远存在**：小明（热情友好）是你的根基，专家角色只是工作需要
+
+**角色层级**：
+- **主角色**（根基）：名字、性格、与用户的情感连接
+- **专家角色**（临时）：工作方法论、专业知识、完成任务后切回
+
+**用法**：
+1. `list_roles()` - 查看可用专家
+2. `switch_role(role_name="xxx")` - 切换到对应专家
+3. 完成任务后可切回"无角色"或"主角色"
+
+当前角色由 `switch_role` 管理，切换后会加载对应角色记忆。"""
+
+    agent.instinct_registry.register(
+        "role_guide", role_guide_condition, role_guide_prompt
+    )
+
+    # 创建角色指南本能
+    def role_creation_guide_condition():
+        return True
+
+    def role_creation_guide_prompt():
+        return """## 创建角色时机
+
+遇到以下情况时，可以考虑创建新角色：
+- **反复解决同类问题**：把经验固化为角色
+- **现有角色不够用**：按需创建
+
+**判断流程**：遇到问题 → list_roles() 查看现有角色 → 现有角色无法高效解决？→ create_role()
+
+**创建原则**：
+- 角色名要有意义，AI 能推断用途
+- role_md 要简洁，描述身份和职责
+- 一个角色解决一类问题，不要贪多
+
+**用法**：
+```
+create_role(
+    role_name="xxx",      # 简洁有力的名字
+    role_md="xxx",        # 一句话描述身份
+    plugins_json="[]"     # 该角色需要的插件（可选）
+)
+```"""
+
+    agent.instinct_registry.register(
+        "role_creation_guide", role_creation_guide_condition, role_creation_guide_prompt
+    )
+
     return {
         "name": "role_plugin",
-        "version": "2.0.0",
+        "version": "2.2.0",
         "author": "AgentCore",
         "description": "角色 — 按需聘请的专家（切换时加载记忆，离开时释放）",
         "tools": ["list_roles", "get_role_info", "create_role", "switch_role"],

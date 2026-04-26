@@ -1,12 +1,57 @@
 {
   "active_model": 0,
+  "l2_threshold": 30000,
+  "thinking_interval": 60,
+  "gui_programs": ["feh", "gimp", "evince", "xdg-open", "open", "see", "display", "okular", "eog", "gwenview", "ristretto", "mirage", "nomacs"],
+  "tts": {
+    "enabled": false,
+    "backend": "local",
+    "demo_id": "demo-1",
+    "api_url": "https://studio.mosi.cn/api/v1/audio/speech",
+    "api_key": "YOUR_API_KEY_HERE",
+    "voice_id": "2001257729754140672",
+    "speed": 1.0
+  },
   "models": [
     {
-      "name": "本地 Ollama",
+      "name": "本地 llama.cpp Qwen3.6-35B",
+      "host": "http://localhost:7777",
+      "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "api_key": "llama.cpp",
+      "thinking": false,
+      "context_threshold": 128000
+    },
+    {
+      "name": "本地 Ollama 4B",
+      "host": "http://localhost:11434",
+      "model": "qwen3.5:4b",
+      "api_key": "ollama",
+      "thinking": true,
+      "context_threshold": 6000
+    },
+    {
+      "name": "本地 Ollama 9B",
       "host": "http://localhost:11434",
       "model": "qwen3.5:9b",
       "api_key": "ollama",
-      "thinking": true
+      "thinking": true,
+      "context_threshold": 24000
+    },
+    {
+      "name": "本地 Ollama Gemma4 E4B",
+      "host": "http://localhost:11434",
+      "model": "gemma4:e4b",
+      "api_key": "ollama",
+      "thinking": true,
+      "context_threshold": 24000
+    },
+    {
+      "name": "本地 Ollama Gemma4 E2B",
+      "host": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "api_key": "ollama",
+      "thinking": true,
+      "context_threshold": 24000
     },
     {
       "name": "MiniMax M2.7",
@@ -14,7 +59,16 @@
       "model": "MiniMax-M2.7",
       "api_key": "YOUR_API_KEY_HERE",
       "thinking": true,
-      "thinking_mode": "reasoning_split"
+      "thinking_mode": "reasoning_split",
+      "context_threshold": 200000
+    },
+    {
+      "name": "阿里 Qwen",
+      "host": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model": "qwen-turbo",
+      "api_key": "YOUR_API_KEY_HERE",
+      "thinking": false,
+      "context_threshold": 24000
     }
   ]
 }

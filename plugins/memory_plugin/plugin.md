@@ -23,6 +23,12 @@
 追加一行到全局记忆。
 - `line`（必填）：要追加的内容
 
+### archive_to_l2
+手动归档指定对话条目到 L2（秘书筛选后使用，不做语义压缩）。
+- `indices`（必填）：要归档的对话索引列表，如 `[3, 4, 5]`
+- **特点**：文本内容保留原始，仅代码块压缩为 `[lang代码块]`
+- **用途**：秘书审视后，建议归档的条目由此工具归档
+
 ## L2 缓存区工具（Librarian 使用）
 
 ### list_l2_cache
@@ -61,3 +67,15 @@
 2. `heat_memory(index)` — 检索某条目时调用，使其升温
 3. `promote_memory(index)` — 高频记忆晋升到持久区
 4. `delete_from_l2(index)` 或 `delete_from_persistent(index)` — 删除过时记忆
+
+## 本能注入（自动）
+
+以下内容会通过本能系统自动注入系统提示：
+
+| 本能名 | 触发条件 | 注入内容 |
+|--------|----------|----------|
+| global_lessons | 始终 | 全局教训 |
+| global_wins | 始终 | 全局成功经验 |
+| role_lessons | 有角色时 | 当前角色专属教训 |
+| role_wins | 有角色时 | 当前角色专属成功经验 |
+| user_profile | 始终 | 用户特征（对话中感知到用户偏好后，用 append_file 追加到 user_profile.md） |

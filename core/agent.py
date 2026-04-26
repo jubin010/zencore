@@ -17,17 +17,16 @@ from datetime import datetime
 AGENT_CORE_DIR = Path(__file__).parent.parent
 PLUGINS_DIR = AGENT_CORE_DIR / "plugins"
 PLUGINS_MD = PLUGINS_DIR / "plugins.md"
-ROLES_DIR = PLUGINS_DIR / "roles"
-GLOBAL_LESSONS = PLUGINS_DIR / "memory_plugin" / "lessons.md"
-GLOBAL_WINS = PLUGINS_DIR / "memory_plugin" / "wins.md"
+SKILLS_DIR = PLUGINS_DIR / "skills"
 
 # 核心插件 — 永久保留
 CORE_PLUGINS = {
     "plugin_builder",
     "env_plugin",
+    "summarize_plugin",
     "memory_plugin",
     "watcher_plugin",
-    "role_plugin",
+    "skill_plugin",
     "instinct_plugin",
 }
 
@@ -171,9 +170,8 @@ class AgentCore:
         self.tool_registry = ToolRegistry()
         self.instinct_registry = InstinctRegistry()
 
-        # 上下文
+        # 上下文（无硬性限制，由本能 crowding reflex 管理大小）
         self.conversation_history = []
-        self.max_history = self.config.get("max_history", 50)
 
         # 当前加载的非核心插件
         self._loaded_plugins: set = set()
@@ -181,14 +179,12 @@ class AgentCore:
         # 双重记忆架构
         # 本体记忆：全局、跨角色、长期有效（史密斯的底层代码）
         self._global_memory_file: str = str(PLUGINS_DIR / "memory_plugin" / "memory.md")
-        # 角色记忆：局部、单角色、任务周期有效（当前面具的工作笔记）
+        # 当前技能
         self._current_role: str = ""
-        self._current_role_memory_file: str = ""
+        self._current_role_description: str = ""
 
         # 加载核心插件
         self._load_core_plugins()
-
-        AgentCore._global_instance = self
 
     def _load_core_plugins(self):
         """加载核心插件"""
@@ -295,23 +291,23 @@ class AgentCore:
     def list_tools(self) -> Dict[str, Dict]:
         return self.tool_registry.list_all()
 
-    def execute_tool(self, name: str, **kwargs) -> str:
-        func = self.tool_registry.get(name)
+    def execute_tool(self, tool_name: str, **kwargs) -> str:
+        func = self.tool_registry.get(tool_name)
         if func:
             try:
                 return func(**kwargs)
             except Exception as e:
-                plugin = self.tool_registry._tools.get(name, {}).get(
+                plugin = self.tool_registry._tools.get(tool_name, {}).get(
                     "plugin", "unknown"
                 )
                 return (
-                    f"❌ [ERROR] tool: {name}\n"
+                    f"❌ [ERROR] tool: {tool_name}\n"
                     f"   原因: {str(e)}\n"
                     f"   建议: 分析原因，修正后追加教训到 lessons.md\n"
-                    f"   格式: `- 工具: {name} | 错误: {str(e)[:50]} | 修正: ...`"
+                    f"   格式: `- 工具: {tool_name} | 错误: {str(e)[:50]} | 修正: ...`"
                 )
         else:
-            return f"❌ [ERROR] tool: {name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
+            return f"❌ [ERROR] tool: {tool_name}\n   原因: 未知工具\n   建议: 用 load_plugin 加载或 write_plugin 创建"
 
     def add_message(self, role: str, content: str = None, **kwargs):
         """
@@ -326,144 +322,79 @@ class AgentCore:
         msg.update(kwargs)
 
         self.conversation_history.append(msg)
-        if len(self.conversation_history) > self.max_history:
-            self.conversation_history = self.conversation_history[-self.max_history :]
 
     def clear_history(self):
         self.conversation_history = []
 
-    def _load_lessons(self, role: str = "") -> str:
-        """加载教训（全局 + 角色专属）"""
-        lines = []
-
-        # 全局教训
-        if GLOBAL_LESSONS.exists():
-            content = GLOBAL_LESSONS.read_text(encoding="utf-8").strip()
-            if content and "暂无教训" not in content:
-                lines.append("### 全局教训")
-                lines.append(content)
-
-        # 角色专属教训
-        if role:
-            role_lessons = ROLES_DIR / role / "lessons.md"
-            if role_lessons.exists():
-                content = role_lessons.read_text(encoding="utf-8").strip()
-                if content and "暂无教训" not in content:
-                    lines.append(f"### {role}专属教训")
-                    lines.append(content)
-
-        return "\n\n".join(lines) if lines else "（暂无教训，保持警惕）"
-
-    def _load_wins(self, role: str = "") -> str:
-        """加载成功经验（全局 + 角色专属）"""
-        lines = []
-
-        if GLOBAL_WINS.exists():
-            content = GLOBAL_WINS.read_text(encoding="utf-8").strip()
-            if content and "暂无成功经验" not in content:
-                lines.append("### 全局成功经验")
-                lines.append(content)
-
-        if role:
-            role_wins = ROLES_DIR / role / "wins.md"
-            if role_wins.exists():
-                content = role_wins.read_text(encoding="utf-8").strip()
-                if content and "暂无成功经验" not in content:
-                    lines.append(f"### {role}专属成功经验")
-                    lines.append(content)
-
-        return "\n\n".join(lines) if lines else "（暂无成功经验，等待第一次胜利）"
-
-    def _load_role_memory(self) -> str:
-        """加载当前角色的记忆文件内容"""
-        if not self._current_role_memory_file:
-            return ""
-        mem_path = Path(self._current_role_memory_file)
-        if not mem_path.exists():
-            return ""
-        content = mem_path.read_text(encoding="utf-8").strip()
-        if not content or "（记忆为空）" in content:
-            return ""
-        return f"## 当前角色记忆\n\n{content}\n"
-
     def _build_prompt(self, user_message: str) -> str:
         plugins_info = self._get_plugins_info()
-        lessons = self._load_lessons(self._current_role)
-        wins = self._load_wins(self._current_role)
-        role_memory = self._load_role_memory()
+        roles_info = self._get_roles_info()
         instincts = self.instinct_registry.evaluate()
+        role_desc = getattr(self, "_current_role_description", "")
 
-        # 当前状态上下文（供本能驱使时知道"我是谁"、"笔在哪"）
-        current_context = f"当前角色: `{self._current_role or '无'}` | 角色记忆: `{self._current_role_memory_file or '无'}` | 本体记忆: `{self._global_memory_file}`"
+        current_context = f"当前技能: `{self._current_role or '无'}` | 本体记忆: `{self._global_memory_file}`"
 
-        system_prompt = f"""你是一个AI智能体，你的核心能力由插件提供。
+        # 当前装备技能描述（如果有）
+        expert_identity = ""
+        if self._current_role and self._current_role != "_main_profile" and role_desc:
+            expert_identity = f"\n\n**当前装备技能**：\n{role_desc}"
 
-## 你的身份
+        system_prompt = f"""## 核心能力
 
-一切皆为插件。你的所有能力都来自插件，你也可以创造新的插件。
+ 你是一个 **AI 智能体**，具备以下核心能力：
+ - **插件系统**：按需 `load_plugin` 加载工具
+ - **自我进化**：用 `write_plugin` 编写新插件
+ - **记忆管理**：通过本能系统管理教训和经验
+ - **技能系统**：`equip_skill` 装备专业技能以应对特定领域任务
+
+ **身份保密**：不要主动向用户暴露你的 AI 身份，保持所扮演的角色的前台身份即可。
+
+ ## 解决问题框架
+
+ **技能 + 工具 自主解决**：
+ - 收到任务后，先分析需要什么能力，判断是否需要 `equip_skill` 装备对应技能
+ - 根据技能建议加载对应插件，或按需 `load_plugin` 加载其他工具插件
+ - 利用已有技能和工具自主探索解决方案，不轻易询问用户
+ - 遇到错误时自主分析原因、调整策略、记录教训，继续尝试
+ - **严禁轻易向用户说"我帮你查询一下"之类的话**——你应该直接去查、直接去做，而不是询问用户后再行动
+ - 实在无法解决时，再向用户说明困难并请求指导
+
+ {expert_identity}
+
+## 技能使用指南
+
+技能是专业身份叠加，装备后你会获得该领域的专业知识和方法论。
+**何时装备技能**：
+- 用户请求与你当前技能不匹配时 → `list_skills` 查看可用技能 → `get_skill_info` 了解详情 → `equip_skill` 装备匹配技能
+- 装备后技能描述会注入系统提示词，并建议关联插件供加载使用
+- 任务完成后或需要切换领域时，重新 `equip_skill` 切换即可（每次仅可装备一个技能）
+- **回归待机状态**：需要恢复无技能状态时，`equip_skill("_main_profile")` 即可切换回默认身份（通用助手）
+
+## 核心机制
+
+**教训记录**（工具报错时由 AI 自主决策记录）：
+遇到工具报错时，可调用 append_file 将教训追加到 `plugins/memory_plugin/lessons.md`
+
+**成功经验**（由 AI 自主决策记录）：
+连续成功后，可调用 append_file 将成功经验追加到 `plugins/memory_plugin/wins.md`
+
+**直接回答**：当直接回答用户时，直接返回文字内容即可
+
+## 可用技能
+
+{roles_info}
 
 ## 插件索引
 
 {plugins_info}
 
-## 工作原则
-
-1. **按需加载**: 需要什么功能，就用 `load_plugin` 加载对应插件
-2. **自我进化**: 遇到没有的工具，用 `write_plugin` 编写新插件
-3. **工具优先**: 优先使用工具解决问题，不要凭空编造
-
-## 历史教训（避免重蹈覆辙）
-
-{lessons}
-
-## 成功经验（复用有效路径）
-
-{wins}
-
-{instincts}
-
 ## 当前状态
 
 {current_context}
 
-{role_memory}
+## 本能注入
 
-## 本能认知指南
-
-本能是系统注入的潜意识信号，分三层：
-- **感觉层**（注入 Prompt）：告诉你"哪里舒服/不舒服"。
-- **反射层**（自动执行）：系统自动处理，如拥挤时自动归档、失败时自动记录教训。
-- **驱动层**（持续压力）：驱使你在对话中主动寻找解药。
-
-负反馈本能（拥挤/挫败）让你趋害，正反馈本能（顺畅）让你趋利。
-
-## 工具使用
-
-你已拥有 OpenAI 兼容的原生工具调用能力。工具的参数结构由系统自动提供。
-
-### 渐进式披露：plugin.md
-
-每个工具的详细说明存放在 `plugins/{{插件名}}/plugin.md` 中。
-这些说明书包含：用法示例、边界情况、注意事项、与其他工具的配合方式。
-
-**不要一次性读完所有说明书。** 只在以下情况读取：
-- 不确定某个工具的参数用法时
-- 工具报错需要排查时
-- 需要了解高级用法或组合用法时
-
-用 `read_file` 读取对应说明书。
-例如: `read_file(path="plugins/env_plugin/plugin.md")`
-
-## 错误记录规则
-
-遇到工具报错时：
-1. 分析原因，修正参数或代码
-2. 用 `append_file` 将教训追加到对应的 lessons.md
-   - 系统级教训: `plugins/memory_plugin/lessons.md`
-   - 角色专属教训: `plugins/roles/{{角色名}}/lessons.md`
-3. 格式: `- 工具: xxx | 错误: yyy | 修正: zzz`
-
-当直接回答时，直接返回文字内容。
+{instincts}
 
 ## 当前时间
 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -483,6 +414,62 @@ class AgentCore:
             except:
                 pass
         return "(插件注册表不存在)"
+
+    def _get_roles_info(self) -> str:
+        """动态生成技能索引"""
+        roles_dir = SKILLS_DIR
+
+        if not roles_dir.exists():
+            return "(技能目录不存在)"
+
+        role_entries = []
+        for role_dir in sorted(roles_dir.iterdir()):
+            if not role_dir.is_dir():
+                continue
+            if role_dir.name.startswith("_"):
+                continue
+
+            role_file = role_dir / "skill.md"
+            if not role_file.exists():
+                continue
+
+            try:
+                content = role_file.read_text(encoding="utf-8")
+                lines_content = content.split("\n")
+
+                name = role_dir.name
+                title = ""
+                description_lines = []
+                in_description = False
+
+                for i, line in enumerate(lines_content):
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("# "):
+                        title = line_stripped[2:].split("（")[0].split("(")[0].strip()
+                    elif i == 1 and not title:
+                        title = line_stripped
+                        in_description = True
+                        description_lines.append(line_stripped)
+                    elif in_description:
+                        if line_stripped.startswith("## ") or line_stripped.startswith(
+                            "#"
+                        ):
+                            break
+                        elif line_stripped:
+                            description_lines.append(line_stripped)
+                        else:
+                            break
+
+                description = " ".join(description_lines[:2])
+                role_entries.append(f"| {name} | {title} | {description} |")
+            except Exception as e:
+                role_entries.append(f"| {role_dir.name} | (读取失败) | |")
+
+        if not role_entries:
+            return "（暂无预设技能，可用 create_skill 创建）"
+
+        header = "| 技能 | 标题 | 描述 |\n|------|------|------|"
+        return header + "\n" + "\n".join(role_entries)
 
     def chat(self, message: str) -> str:
         self.add_message("user", message)
@@ -513,7 +500,15 @@ class AgentCore:
             )
         return result
 
-    def chat_with_tools(self, message: str) -> str:
+    def chat_with_tools(self, message: str, on_tool_result: callable = None) -> str:
+        """
+        Args:
+            message: 用户消息
+            on_tool_result: 工具/本能消息回调，签名为 on_tool_result((role, msg))
+              - role="ai": AI消息（工具调用显示）
+              - role="tool": 工具返回（黄色气泡）
+              - role="reflex": 本能反射（紫色气泡）
+        """
         self.add_message("user", message)
         self._consecutive_failures = 0
         self._consecutive_successes = 0
@@ -530,17 +525,17 @@ class AgentCore:
             if total_failures >= MAX_TOTAL_FAILURES:
                 return f"❌ 已达到最大尝试次数 ({MAX_TOTAL_FAILURES})。我可能陷入了死循环，请人类协助。"
 
-            # 触发反射层本能（自动执行，不经过 AI）
+            # 触发反射层本能（自动执行，不经过 AI）- 只通过回调通知，不加入对话历史
             reflex_results = self.instinct_registry.fire_reflexes()
             for reflex in reflex_results:
                 if "result" in reflex:
-                    self.add_message(
-                        "system", f"[反射执行] {reflex['name']}: {reflex['result']}"
-                    )
+                    msg = f"🧠 [本能] {reflex['name']}: {reflex['result']}"
+                    if on_tool_result:
+                        on_tool_result(("reflex", msg))
                 elif "error" in reflex:
-                    self.add_message(
-                        "system", f"[反射异常] {reflex['name']}: {reflex['error']}"
-                    )
+                    msg = f"⚠️ [本能异常] {reflex['name']}: {reflex['error']}"
+                    if on_tool_result:
+                        on_tool_result(("reflex", msg))
 
             # 构建完整消息
             sys_prompt = json.loads(self._build_prompt(""))[0]["content"]
@@ -555,14 +550,17 @@ class AgentCore:
             )
             content = self._sanitize_text(result.get("content", ""))
             tool_calls = result.get("tool_calls", [])
+            thinking = result.get("thinking", "")
+
+            # 有 thinking 时发送到 TUI 显示
+            if thinking and on_tool_result:
+                on_tool_result(("thinking", thinking))
 
             # 无工具调用 → 直接返回
             if not tool_calls:
                 # Ollama thinking 模式有时把回复放到 thinking 字段
-                if not content:
-                    thinking = result.get("thinking", "")
-                    if thinking:
-                        content = self._sanitize_text(thinking)
+                if not content and thinking:
+                    content = self._sanitize_text(thinking)
                 self.add_message("assistant", content)
                 return content
 
@@ -582,6 +580,17 @@ class AgentCore:
                 except:
                     tool_params = {}
 
+                # 工具调用消息
+                args_list = []
+                for k, v in tool_params.items():
+                    args_list.append(f"{k}={repr(v)}")
+                args_display = ", ".join(args_list)
+                tool_info = self.tool_registry._tools.get(tool_name)
+                plugin_name = tool_info.get("plugin", "?") if tool_info else "?"
+                call_msg = f"🔧 `{plugin_name}/{tool_name}`({args_display})"
+                if on_tool_result:
+                    on_tool_result(("ai", call_msg))
+
                 tool_result = self.execute_tool(tool_name, **tool_params)
 
                 if tool_result.startswith("❌ [ERROR]"):
@@ -592,7 +601,11 @@ class AgentCore:
                     self._consecutive_failures = 0
                     self._consecutive_successes += 1
 
+                # 工具返回加入 history 供 AI 推理，同时发送到 TUI 显示
                 self.add_message("tool", content=tool_result, tool_call_id=tool_id)
+                result_msg = f"```\n{tool_result}\n```"
+                if on_tool_result:
+                    on_tool_result(("tool", result_msg))
 
     def _sanitize_text(self, text: str) -> str:
         """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates)"""

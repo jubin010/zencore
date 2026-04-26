@@ -21,7 +21,7 @@ def extract_plugin_info(plugin_dir: Path) -> dict:
         "description": "",
         "author": "未知",
         "version": "1.0.0",
-        "tools": {},
+        "tools": [],
     }
 
     if not init_file.exists():
@@ -40,36 +40,48 @@ def extract_plugin_info(plugin_dir: Path) -> dict:
                 info["description"] = line[:60]
                 break
 
+    # 提取 register() 返回的 tools 列表
+    tools_match = re.search(
+        r'return\s*\{[^}]*"tools"\s*:\s*\[([^\]]+)\]', content, re.DOTALL
+    )
+    if tools_match:
+        tools_str = tools_match.group(1)
+        tools = [
+            t.strip().strip('"').strip("'") for t in tools_str.split(",") if t.strip()
+        ]
+        info["tools"] = tools
+
     return info
 
 
 def generate_plugins_md(plugins_info: list) -> str:
-    """生成 plugins.md 内容 — 纯索引格式"""
+    """生成 plugins.md 内容 — 带工具列表"""
     lines = [
         "# 插件索引",
         "",
         "> AI 自主决策工作流：",
-        "> 1. 查看本索引了解可用插件",
+        "> 1. 查看本索引了解可用插件和工具",
         "> 2. 用 `get_plugin_info` 读取目标插件的 plugin.md 详情",
-        "> 3. 按需 `load_plugin` 加载",
+        "> 3. 按需 `load_plugin` 加载后直接使用工具",
         "",
-        "## 插件列表",
-        "",
-        "| 插件目录 | 一句话描述 |",
-        "|----------|------------|",
     ]
 
     for p in plugins_info:
-        desc = p.get("description", "")[:60]
-        lines.append(f"| `{p['name']}/` | {desc} |")
+        name = p.get("name", "")
+        desc = p.get("description", "") or "（无描述）"
+        tools = p.get("tools", [])
 
-    lines.extend(
-        [
-            "",
-            "---\n",
-            f"*最后更新: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n",
-        ]
-    )
+        lines.append(f"## `{name}/` — {desc}")
+
+        if tools:
+            tools_str = ", ".join([f"`{t}`" for t in tools])
+            lines.append(f"**工具**: {tools_str}")
+        else:
+            lines.append("**工具**: （本能插件，无直接工具）")
+
+        lines.append("")
+
+    lines.append(f"---\n*最后更新: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n")
 
     return "\n".join(lines)
 

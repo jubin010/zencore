@@ -20,8 +20,14 @@ console = Console()
 
 
 def _sanitize(text: str) -> str:
-    """净化文本：移除 UTF-8 不支持的代理字符 (Surrogates U+D800-U+DFFF)"""
-    return re.sub(r"[\ud800-\udfff]", "", text) if text else ""
+    """净化文本：移除 UTF-8 不支持的代理字符"""
+    if not text:
+        return ""
+    # 移除 surrogate 字符
+    text = re.sub(r"[\ud800-\udfff]", "", text)
+    # 移除其他非法字符
+    text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+    return text
 
 
 def _parse_ollama_thinking_toolcalls(thinking: str) -> list:
@@ -59,6 +65,44 @@ def _parse_ollama_thinking_toolcalls(thinking: str) -> list:
     return tool_calls
 
 
+def _parse_tool_call_tags(text: str) -> list:
+    """从文本中解析 <tool_call>...</tool_call> 标签（llama.cpp 备用方案）"""
+    if not text:
+        return []
+
+    pattern = r"<tool_call>\s*<function=(\w+)[^>]*>(.*?)</tool_call>"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    tool_calls = []
+    for i, match in enumerate(matches):
+        func_name = match[0]
+        inner = match[1].strip()
+
+        param_pattern = r"<parameter=(\w+)>([^<]*)</parameter>"
+        param_matches = re.findall(param_pattern, inner)
+
+        arguments = {}
+        for pm in param_matches:
+            param_name = pm[0]
+            param_value = pm[1].strip()
+            arguments[param_name] = param_value
+
+        tool_calls.append(
+            {
+                "id": f"llama_tc_fallback_{i}_{id(text)}",
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False)
+                    if arguments
+                    else "{}",
+                },
+            }
+        )
+
+    return tool_calls
+
+
 class CLIDriver(DriverInterface):
     """命令行驱动（Rich 美化版）"""
 
@@ -77,6 +121,7 @@ class CLIDriver(DriverInterface):
         self.thinking = self.model_config.get("thinking", False)
         self.thinking_mode = self.model_config.get("thinking_mode", "")
         self._client = None
+        self._silent = False
 
     def switch_model(self, model_config: dict):
         """切换模型配置"""
@@ -95,7 +140,7 @@ class CLIDriver(DriverInterface):
             if not self.api_key or self.api_key.lower() == "ollama":
                 import ollama
 
-                self._client = ollama.Client(host=self.host)
+                self._client = ollama.Client(host=self.host, timeout=300)
             else:
                 from openai import OpenAI
 
@@ -114,14 +159,17 @@ class CLIDriver(DriverInterface):
             return "\n".join(parts)
         return ""
 
-    def send_message(self, content: str) -> None:
-        console.print(Markdown(content))
+    def send_message(self, content: str, force: bool = False) -> None:
+        if force or not self._silent:
+            console.print(Markdown(content))
 
     def send_image(self, path: str) -> None:
-        console.print(f"[bold yellow][图片: {path}][/]")
+        if not self._silent:
+            console.print(f"[bold yellow][图片: {path}][/]")
 
     def send_file(self, path: str) -> None:
-        console.print(f"[bold yellow][文件: {path}][/]")
+        if not self._silent:
+            console.print(f"[bold yellow][文件: {path}][/]")
 
     def get_input(self, prompt: str = "") -> str:
         try:
@@ -132,9 +180,12 @@ class CLIDriver(DriverInterface):
             return ""
 
     def show_loading(self, message: str = "处理中..."):
-        console.print(f"[dim]⏳ {message}...[/]")
+        if not self._silent:
+            console.print(f"[dim]⏳ {message}...[/]")
 
     def start_thinking(self):
+        if self._silent:
+            return
         from rich.spinner import Spinner
         from rich.live import Live
 
@@ -143,12 +194,15 @@ class CLIDriver(DriverInterface):
         self._thinking_live.start()
 
     def stop_thinking(self):
+        if self._silent:
+            return
         if hasattr(self, "_thinking_live") and self._thinking_live:
             self._thinking_live.stop()
             self._thinking_live = None
 
     def toast(self, message: str, duration: int = 3) -> None:
-        console.print(Panel(message, title="📢 提示", border_style="yellow"))
+        if not self._silent:
+            console.print(Panel(message, title="📢 提示", border_style="yellow"))
 
     def set_title(self, title: str) -> None:
         pass
@@ -253,7 +307,7 @@ class CLIDriver(DriverInterface):
                 if not native_tool_calls and self.thinking and thinking:
                     native_tool_calls = _parse_ollama_thinking_toolcalls(thinking)
 
-                if self.thinking and thinking:
+                if self.thinking and thinking and not self._silent:
                     console.print(
                         Panel(
                             Markdown(thinking),
@@ -265,6 +319,116 @@ class CLIDriver(DriverInterface):
 
                 return {
                     "content": answer,
+                    "tool_calls": native_tool_calls,
+                    "thinking": thinking,
+                }
+
+            elif self.api_key.lower() == "llama.cpp":
+                extra_body = {"chat_template_kwargs": {}}
+                if self.thinking:
+                    extra_body["chat_template_kwargs"]["enable_thinking"] = True
+                else:
+                    extra_body["chat_template_kwargs"]["enable_thinking"] = False
+                if self.thinking_mode and self.thinking_mode.startswith("extra_body:"):
+                    key, val = self.thinking_mode[len("extra_body:") :].split("=", 1)
+                    extra_body[key.strip()] = val.strip().lower() == "true"
+
+                processed_messages = []
+                for msg in messages:
+                    if msg.get("role") == "assistant" and "tool_calls" in msg:
+                        processed_tcs = []
+                        for tc in msg["tool_calls"]:
+                            fn = tc.get("function", {})
+                            args = fn.get("arguments", "{}")
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {}
+                            processed_tcs.append({
+                                "id": tc.get("id", f"llama_tc_{id(tc)}"),
+                                "type": "function",
+                                "function": {
+                                    "name": fn.get("name", ""),
+                                    "arguments": args,
+                                }
+                            })
+                        processed_messages.append({
+                            "role": "assistant",
+                            "content": msg.get("content") or "",
+                            "tool_calls": processed_tcs,
+                        })
+                    else:
+                        processed_messages.append(msg)
+
+                api_kwargs = {
+                    "model": self.model,
+                    "messages": processed_messages,
+                    "temperature": 0.7,
+                }
+                api_kwargs["extra_body"] = extra_body
+                if tools:
+                    api_kwargs["tools"] = tools
+
+                self.start_thinking()
+                try:
+                    response = client.chat.completions.create(**api_kwargs)
+                finally:
+                    self.stop_thinking()
+
+                message = response.choices[0].message
+
+                thinking = ""
+                if hasattr(message, "reasoning_details") and message.reasoning_details:
+                    parts = []
+                    for detail in message.reasoning_details:
+                        if isinstance(detail, dict) and "text" in detail:
+                            parts.append(detail["text"])
+                        elif hasattr(detail, "text"):
+                            parts.append(detail.text)
+                    thinking = "\n".join(parts)
+                elif hasattr(message, "thinking") and message.thinking:
+                    thinking = _sanitize(message.thinking)
+                elif hasattr(message, "model_extra") and message.model_extra:
+                    rc = message.model_extra.get("reasoning_content", "")
+                    if rc:
+                        thinking = _sanitize(rc)
+                elif hasattr(message, "reasoning_content") and message.reasoning_content:
+                    thinking = _sanitize(message.reasoning_content)
+
+                if thinking and not self._silent:
+                    console.print(
+                        Panel(
+                            Markdown(thinking),
+                            title=f"💭 {self.name} 思考过程",
+                            border_style="blue",
+                        )
+                    )
+                    console.print(Rule(style="dim"))
+
+                native_tool_calls = []
+                content = message.content if message.content else ""
+
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    for tc in message.tool_calls:
+                        native_tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                        )
+                else:
+                    parsed_tcs = _parse_tool_call_tags(content)
+                    if parsed_tcs:
+                        native_tool_calls = parsed_tcs
+                        content = re.sub(r"<tool_call>\s*<function=\w+[^>]*>.*?</tool_call>", "", content, flags=re.DOTALL)
+
+                return {
+                    "content": _sanitize(content),
                     "tool_calls": native_tool_calls,
                     "thinking": thinking,
                 }
@@ -303,7 +467,7 @@ class CLIDriver(DriverInterface):
                 elif hasattr(message, "thinking") and message.thinking:
                     thinking = _sanitize(message.thinking)
 
-                if thinking:
+                if thinking and not self._silent:
                     console.print(
                         Panel(
                             Markdown(thinking),

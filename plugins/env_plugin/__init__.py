@@ -1,13 +1,44 @@
 """
-env_plugin - 环境感知
-功能：让 AI 感知运行环境
+env_plugin - 环境感知及改造
+功能：让 AI 感知并改造运行环境
 """
 
 import os
+import time
 import subprocess
 import shutil
 import datetime
+import json
 from pathlib import Path
+
+AGENT_ROOT = Path(__file__).parent.parent.parent
+
+# 后台进程管理器
+_bg_processes_file = AGENT_ROOT / "config" / ".bg_processes.json"
+
+
+def _load_bg_processes():
+    """加载后台进程列表"""
+    if _bg_processes_file.exists():
+        try:
+            with open(_bg_processes_file) as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+
+def _save_bg_processes(processes):
+    """保存后台进程列表"""
+    _bg_processes_file.parent.mkdir(exist_ok=True)
+    with open(_bg_processes_file, "w") as f:
+        json.dump(processes, f, ensure_ascii=False)
+
+
+def _get_next_id():
+    """获取下一个进程 ID"""
+    processes = _load_bg_processes()
+    return len(processes) + 1
 
 
 def register(agent):
@@ -29,8 +60,234 @@ def register(agent):
         except PermissionError:
             return f"❌ 无权限访问: {path}"
 
-    def run_command(command: str, timeout: int = 30) -> str:
+    def read_file(path: str, lines: int = 0, encoding: str = "utf-8") -> str:
+        """读取文件内容
+
+        Args:
+            path: 文件路径（相对于 AGENT_ROOT，或绝对路径）
+            lines: 限制行数（0=全部）
+            encoding: 文件编码
+        """
         try:
+            file_path = Path(path)
+            if not file_path.is_absolute():
+                file_path = AGENT_ROOT / file_path
+
+            if not file_path.exists():
+                return f"❌ 文件不存在: {path}"
+
+            content = file_path.read_text(encoding=encoding)
+
+            if lines > 0:
+                content_lines = content.split("\n")
+                total = len(content_lines)
+                content = "\n".join(content_lines[:lines])
+                return f"[共 {total} 行，显示前 {lines} 行]\n{content}"
+
+            return content
+        except PermissionError:
+            return f"❌ 无权限读取: {path}"
+        except Exception as e:
+            return f"❌ 读取失败: {e}"
+
+    def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
+        """写入文件（覆盖）
+
+        Args:
+            path: 文件路径（相对于 AGENT_ROOT，或绝对路径）
+            content: 文件内容
+            encoding: 文件编码
+        """
+        try:
+            file_path = Path(path)
+            if not file_path.is_absolute():
+                file_path = AGENT_ROOT / file_path
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding=encoding)
+            return f"✅ 已写入: {path} ({len(content)} 字符)"
+        except PermissionError:
+            return f"❌ 无权限写入: {path}"
+        except Exception as e:
+            return f"❌ 写入失败: {e}"
+
+    def append_file(path: str, content: str, encoding: str = "utf-8") -> str:
+        """追加内容到文件
+
+        Args:
+            path: 文件路径（相对于 AGENT_ROOT，或绝对路径）
+            content: 追加内容
+            encoding: 文件编码
+        """
+        try:
+            file_path = Path(path)
+            if not file_path.is_absolute():
+                file_path = AGENT_ROOT / file_path
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, "a", encoding=encoding) as f:
+                f.write(content)
+            return f"✅ 已追加到: {path} ({len(content)} 字符)"
+        except PermissionError:
+            return f"❌ 无权限写入: {path}"
+        except Exception as e:
+            return f"❌ 追加失败: {e}"
+
+    def find_file(pattern: str, path: str = ".") -> str:
+        """搜索文件（按名称）
+
+        Args:
+            pattern: 文件名模式，支持通配符
+                - "*.json" 匹配所有 json 文件
+                - "settings*" 匹配以 settings 开头的文件
+                - "*.py" 匹配所有 Python 文件
+            path: 搜索目录，默认当前目录
+        """
+        try:
+            search_path = Path(path)
+            if not search_path.is_absolute():
+                search_path = AGENT_ROOT / search_path
+
+            if not search_path.exists():
+                return f"❌ 目录不存在: {path}"
+
+            matches = list(search_path.rglob(pattern))
+            if not matches:
+                return f"📭 未找到匹配 `{pattern}` 的文件"
+
+            lines = [
+                f"🔍 搜索 `{pattern}` 在 {search_path}",
+                f"共找到 {len(matches)} 个结果",
+                "",
+            ]
+            for m in matches[:20]:
+                rel_path = (
+                    m.relative_to(search_path) if m.is_relative_to(search_path) else m
+                )
+                prefix = "📁" if m.is_dir() else "📄"
+                lines.append(f"  {prefix} {rel_path}")
+
+            if len(matches) > 20:
+                lines.append(f"  ... 还有 {len(matches) - 20} 个结果")
+
+            return "\n".join(lines)
+        except PermissionError:
+            return f"❌ 无权限访问: {path}"
+        except Exception as e:
+            return f"❌ 搜索失败: {e}"
+
+    def grep(pattern: str, path: str = ".", max_results: int = 20) -> str:
+        """搜索文件内容
+
+        Args:
+            pattern: 搜索关键词（支持正则）
+            path: 搜索目录，默认当前目录
+            max_results: 最大结果数，默认 20
+        """
+        try:
+            search_path = Path(path)
+            if not search_path.is_absolute():
+                search_path = AGENT_ROOT / search_path
+
+            if not search_path.exists():
+                return f"❌ 目录不存在: {path}"
+
+            import re
+
+            regex = re.compile(pattern)
+
+            results = []
+            for file_path in search_path.rglob("*"):
+                if file_path.is_file():
+                    try:
+                        content = file_path.read_text(encoding="utf-8", errors="ignore")
+                        lines = content.split("\n")
+                        for i, line in enumerate(lines, 1):
+                            if regex.search(line):
+                                rel_path = (
+                                    file_path.relative_to(search_path)
+                                    if file_path.is_relative_to(search_path)
+                                    else file_path
+                                )
+                                results.append(f"📄 {rel_path}:{i}")
+                                results.append(f"   {line.strip()[:100]}")
+                                if len(results) >= max_results * 2:
+                                    break
+                    except:
+                        continue
+
+                if len(results) >= max_results * 2:
+                    break
+
+            if not results:
+                return f"📭 未在 `{path}` 中找到包含 `{pattern}` 的内容"
+
+            lines = [
+                f"🔍 搜索 `{pattern}` 在 {search_path}",
+                f"共找到 {len(results) // 2} 处匹配",
+                "",
+            ]
+            lines.extend(results[: max_results * 2])
+
+            return "\n".join(lines)
+        except PermissionError:
+            return f"❌ 无权限访问: {path}"
+        except Exception as e:
+            return f"❌ 搜索失败: {e}"
+
+    def run_command(command: str, timeout: int = 90, background: bool = None) -> str:
+        """执行系统命令
+
+        Args:
+            command: 要执行的命令
+            timeout: 超时时间（秒），默认90秒
+            background: 是否后台运行。
+                       None=自动检测（若是gui_programs中的程序则后台运行）
+                       True=强制后台运行
+                       False=强制同步运行
+        """
+        try:
+            # 加载 gui_programs 配置
+            if background is None:
+                config_file = AGENT_ROOT / "config" / "settings.json"
+                gui_programs = []
+                try:
+                    with open(config_file) as f:
+                        config = json.load(f)
+                        gui_programs = config.get("gui_programs", [])
+                except:
+                    pass
+
+                # 检测命令中是否包含 gui 程序（支持组合命令）
+                background = False
+                for gui_prog in gui_programs:
+                    if gui_prog in command:
+                        background = True
+                        break
+
+            if background:
+                # 使用 setsid 彻底脱离终端，后台运行
+                proc = subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=os.getcwd(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                # 保存进程信息
+                proc_id = _get_next_id()
+                processes = _load_bg_processes()
+                processes.append({
+                    "id": proc_id,
+                    "pid": proc.pid,
+                    "command": command,
+                    "started": datetime.datetime.now().isoformat()
+                })
+                _save_bg_processes(processes)
+                return f"✅ 已后台启动: {command} [进程ID: {proc_id}, PID: {proc.pid}]"
+
             result = subprocess.run(
                 command,
                 shell=True,
@@ -91,6 +348,112 @@ def register(agent):
     )
 
     agent.add_tool(
+        "read_file",
+        read_file,
+        {
+            "name": "read_file",
+            "description": "读取文件内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径（相对或绝对）"},
+                    "lines": {
+                        "type": "integer",
+                        "description": "限制行数（0=全部，默认0）",
+                    },
+                    "encoding": {"type": "string", "description": "编码，默认utf-8"},
+                },
+                "required": ["path"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "write_file",
+        write_file,
+        {
+            "name": "write_file",
+            "description": "写入文件（覆盖）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径（相对或绝对）"},
+                    "content": {"type": "string", "description": "文件内容"},
+                    "encoding": {"type": "string", "description": "编码，默认utf-8"},
+                },
+                "required": ["path", "content"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "append_file",
+        append_file,
+        {
+            "name": "append_file",
+            "description": "追加内容到文件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径（相对或绝对）"},
+                    "content": {"type": "string", "description": "追加内容"},
+                    "encoding": {"type": "string", "description": "编码，默认utf-8"},
+                },
+                "required": ["path", "content"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "find_file",
+        find_file,
+        {
+            "name": "find_file",
+            "description": "搜索文件（按名称）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "文件名模式，支持通配符如 *.json, settings*",
+                    },
+                    "path": {"type": "string", "description": "搜索目录，默认当前目录"},
+                },
+                "required": ["pattern"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "grep",
+        grep,
+        {
+            "name": "grep",
+            "description": "搜索文件内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "搜索关键词（支持正则）",
+                    },
+                    "path": {"type": "string", "description": "搜索目录，默认当前目录"},
+                    "max_results": {
+                        "type": "integer",
+                        "description": "最大结果数，默认20",
+                    },
+                },
+                "required": ["pattern"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
         "run_command",
         run_command,
         {
@@ -104,6 +467,139 @@ def register(agent):
                 },
                 "required": ["command"],
             },
+            "plugin": "env_plugin",
+        },
+    )
+
+    def is_wsl2():
+        return os.path.exists("/proc/version") and "microsoft" in open("/proc/version").read().lower()
+
+    def kill_process_robustly(pid: int) -> tuple[bool, str]:
+        """彻底杀进程：进程组 + SIGTERM→SIGKILL + 验证"""
+        try:
+            pgid = os.getpgid(pid)
+            for sig in (15, 9):
+                try:
+                    os.kill(-pgid if pgid != os.getpid() else pid, sig)
+                    time.sleep(0.2)
+                except ProcessLookupError:
+                    pass
+            if os.kill(pid, 0) in (None, []):
+                return True, f"PID {pid} 已关闭"
+            return False, f"PID {pid} 杀不掉"
+        except ProcessLookupError:
+            return True, f"PID {pid} 不存在"
+        except PermissionError:
+            return False, f"PID {pid} 无权限"
+
+    def kill_background_process(proc_id: int = None, name: str = None) -> str:
+        """关闭后台进程
+
+        Args:
+            proc_id: 后台进程 ID（run_command 返回的 [进程ID]）
+            name: 进程名称（描述，如"图片查看器"）
+        """
+        processes = _load_bg_processes()
+        killed_ids = []
+        killed_msgs = []
+        failed = []
+
+        for p in processes:
+            if proc_id is not None and p["id"] != proc_id:
+                continue
+            if name is not None and name.lower() not in p["command"].lower():
+                continue
+
+            pid = p["pid"]
+            success, msg = kill_process_robustly(pid)
+            if success:
+                killed_ids.append(p["id"])
+                killed_msgs.append(f"进程ID {p['id']} (PID {pid})")
+            else:
+                failed.append((p["id"], pid, msg))
+
+        if failed and is_wsl2():
+            for proc_id, pid, msg in list(failed):
+                try:
+                    subprocess.run(
+                        ["wmic", "process", "where", f"processid={pid}", "call", "terminate"],
+                        capture_output=True, timeout=10
+                    )
+                    killed_ids.append(proc_id)
+                    killed_msgs.append(f"WSL2 Windows侧: PID {pid}")
+                    failed.remove((proc_id, pid, msg))
+                except:
+                    pass
+
+        remaining = [p for p in processes if p["id"] not in killed_ids]
+        _save_bg_processes(remaining)
+
+        parts = []
+        if killed_msgs:
+            parts.append(f"✅ 已关闭: {', '.join(killed_msgs)}")
+        if failed:
+            parts.append(f"❌ 失败: {', '.join([f'{p[0]}/{p[1]}: {p[2]}' for p in failed])}")
+        return " | ".join(parts) if parts else "❌ 未找到指定进程"
+
+    def list_background_processes() -> str:
+        """列出当前后台进程"""
+        processes = _load_bg_processes()
+        if not processes:
+            return "暂无后台进程"
+
+        lines = ["当前后台进程:"]
+        for p in processes:
+            lines.append(f"- ID {p['id']}: {p['command']} (PID {p['pid']}, 启动于 {p['started']})")
+        return "\n".join(lines)
+
+    agent.add_tool(
+        "run_command",
+        run_command,
+        {
+            "name": "run_command",
+            "description": "执行 shell 命令。GUI程序会自动后台运行。返回格式如「[进程ID: 1, PID: 1234]」，其中进程ID才是kill_background_process要用的参数！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer"},
+                },
+                "required": ["command"],
+            },
+            "plugin": "env_plugin",
+        },
+    )
+
+    agent.add_tool(
+        "kill_background_process",
+        kill_background_process,
+        {
+            "name": "kill_background_process",
+            "description": "关闭后台进程。注意：参数是list_background_processes返回的[进程ID]（纯数字），不是系统PID！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proc_id": {
+                        "type": "integer",
+                        "description": "进程ID（list返回的纯数字，如1、2、3），不是系统PID"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "进程名称（模糊匹配）"
+                    }
+                }
+            },
+            "plugin": "env_plugin",
+        }
+    )
+
+    agent.add_tool(
+        "list_background_processes",
+        list_background_processes,
+        {
+            "name": "list_background_processes",
+            "description": "列出当前后台进程",
+            "parameters": {"type": "object", "properties": {}},
             "plugin": "env_plugin",
         },
     )
@@ -126,8 +622,20 @@ def register(agent):
 
     return {
         "name": "env_plugin",
-        "version": "1.1.0",
+        "version": "2.2.0",
         "author": "AgentCore",
-        "description": "环境感知 — 让 AI 感知运行环境",
-        "tools": ["get_cwd", "list_files", "run_command", "backup_state"],
+        "description": "环境感知及改造 — 文件读写搜、索命令执行、状态备份、后台进程管理",
+        "tools": [
+            "get_cwd",
+            "list_files",
+            "read_file",
+            "write_file",
+            "append_file",
+            "find_file",
+            "grep",
+            "run_command",
+            "kill_background_process",
+            "list_background_processes",
+            "backup_state",
+        ],
     }
