@@ -15,22 +15,6 @@
 - 返回：带图标的目录列表（📁 目录，📄 文件）
 - 示例：`list_files(path="config")`
 
-### find_file
-按文件名搜索文件（递归遍历子目录）。
-- `pattern`（必填）：文件名模式，支持通配符
-  - `*.json` - 所有 json 文件
-  - `settings*` - 以 settings 开头的文件
-  - `*.py` - 所有 Python 文件
-- `path`（可选）：搜索目录，默认当前目录
-- 示例：`find_file(pattern="*.json")`
-
-### grep
-在文件中搜索内容（递归遍历子目录）。
-- `pattern`（必填）：搜索关键词，支持正则表达式
-- `path`（可选）：搜索目录，默认当前目录
-- `max_results`（可选）：最大结果数，默认 20
-- 示例：`grep(pattern="TODO", path="plugins")`
-
 ### read_file
 读取文件内容。
 - `path`（必填）：文件路径
@@ -51,16 +35,46 @@
 - `content`（必填）：追加内容（会自动加换行）
 - `encoding`（可选）：文件编码，默认 utf-8
 
+### find_file
+按文件名搜索文件（递归遍历子目录）。
+- `pattern`（必填）：文件名模式，支持通配符
+  - `*.json` - 所有 json 文件
+  - `settings*` - 以 settings 开头的文件
+  - `*.py` - 所有 Python 文件
+- `path`（可选）：搜索目录，默认当前目录
+- 示例：`find_file(pattern="*.json")`
+
+### grep
+在文件中搜索内容（递归遍历子目录）。
+- `pattern`（必填）：搜索关键词，支持正则表达式
+- `path`（可选）：搜索目录，默认当前目录
+- `max_results`（可选）：最大结果数，默认 20
+- 示例：`grep(pattern="TODO", path="plugins")`
+
 ### run_command
-执行 shell 命令。
+执行 shell 命令。GUI 程序会自动后台运行。
 - `command`（必填）：要执行的 shell 命令
 - `timeout`（可选）：超时秒数，默认 30 秒
 - 返回：stdout + stderr（如有）+ 退出码
+- **GUI 程序自动后台运行**：返回格式如「[进程ID: 1, PID: 1234]」，其中进程ID才是kill_background_process要用的参数！
 - 常用命令：
   - `ls -la` - 详细列出目录
   - `cat file` - 查看文件
   - `grep "pattern" file` - 搜索内容
   - `mkdir -p dir` - 创建目录
+
+### kill_background_process
+关闭后台进程。
+- `proc_id`（可选）：进程ID（list_background_processes返回的纯数字，如1、2、3），**不是系统PID**
+- `name`（可选）：进程名称（模糊匹配）
+- 注意：参数是list返回的[进程ID]（纯数字），不是系统PID！
+- 示例：`kill_background_process(proc_id=1)`
+
+### list_background_processes
+列出当前后台进程。
+- 参数：无
+- 返回：所有后台进程列表，格式如「ID 1: feh (PID 935), 启动于 2026-04-26T13:11:35」
+- 注意：返回的是**进程ID**（纯数字），不是系统PID！
 
 ### backup_state
 备份当前插件和配置状态。
@@ -86,4 +100,10 @@
 ```
 1. read_file(path="config/settings.json")
 2. write_file(path="config/settings.json", content=新内容)
+```
+
+**关闭后台进程**：
+```
+1. list_background_processes()  # 查看进程ID
+2. kill_background_process(proc_id=1)  # 用进程ID关闭，不是PID！
 ```
