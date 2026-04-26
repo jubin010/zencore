@@ -557,7 +557,7 @@ def register(agent):
         run_command,
         {
             "name": "run_command",
-            "description": "执行 shell 命令。GUI 程序会自动后台运行并返回进程ID",
+            "description": "执行 shell 命令。GUI程序会自动后台运行。返回格式如「[进程ID: 1, PID: 1234]」，其中进程ID才是kill_background_process要用的参数！",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -575,13 +575,13 @@ def register(agent):
         kill_background_process,
         {
             "name": "kill_background_process",
-            "description": "关闭后台进程",
+            "description": "关闭后台进程。注意：参数是list_background_processes返回的[进程ID]（纯数字），不是系统PID！",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "proc_id": {
                         "type": "integer",
-                        "description": "后台进程ID"
+                        "description": "进程ID（list返回的纯数字，如1、2、3），不是系统PID"
                     },
                     "name": {
                         "type": "string",
