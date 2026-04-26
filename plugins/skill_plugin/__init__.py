@@ -5,6 +5,7 @@ skill_plugin - 技能管理
 主角色由 memory_plugin/main_role.md 始终注入，技能只是叠加的专业能力。
 """
 
+import json
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
